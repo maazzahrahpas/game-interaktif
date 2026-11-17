@@ -1,0 +1,363 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Profil publik pengguna Eduverse (Guru, Siswa, atau Super Admin) tanpa PII sensitif.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": { "type": "string", "enum": ["super_admin", "guru", "siswa"] },
+        "avatarColor": { "type": "string", "minLength": 4, "maxLength": 20 },
+        "xp": { "type": "integer" },
+        "level": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "avatarColor", "xp", "level", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Data PII pengguna yang terisolasi (email, NIS/NIP, sekolah).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "identityNumber": { "type": "string", "maxLength": 40 },
+        "schoolName": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Daftar administrator tepercaya yang dapat mengelola sistem.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Classroom": {
+      "title": "Classroom",
+      "description": "Kelas atau ruang pembelajaran milik guru.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "grade": { "type": "string", "enum": ["10", "11", "12", "Umum"] },
+        "subject": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 400 },
+        "inviteCode": { "type": "string", "minLength": 4, "maxLength": 16, "pattern": "^[A-Z0-9]+$" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherId", "name", "grade", "subject", "inviteCode", "isActive", "createdAt", "updatedAt"]
+    },
+    "QuestionBank": {
+      "title": "QuestionBank",
+      "description": "Kumpulan soal pembelajaran milik guru.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "subject": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "grade": { "type": "string", "enum": ["10", "11", "12", "Umum"] },
+        "topic": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "difficulty": { "type": "string", "enum": ["Mudah", "Sedang", "Sulit"] },
+        "questionCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherId", "title", "subject", "grade", "topic", "difficulty", "questionCount", "createdAt", "updatedAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Butir soal yang dapat dibaca siswa tanpa kunci jawaban.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bankId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderIndex": { "type": "integer" },
+        "prompt": { "type": "string", "minLength": 3, "maxLength": 1000 },
+        "options": { "type": "array", "description": "Maksimal 5 pilihan jawaban." },
+        "points": { "type": "integer" },
+        "difficulty": { "type": "string", "enum": ["Mudah", "Sedang", "Sulit"] },
+        "hint": { "type": "string", "maxLength": 400 },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "bankId", "teacherId", "orderIndex", "prompt", "options", "points", "difficulty", "isPublished", "createdAt", "updatedAt"]
+    },
+    "AnswerKey": {
+      "title": "AnswerKey",
+      "description": "Kunci jawaban dan pembahasan yang terisolasi dan terlarang bagi siswa.",
+      "type": "object",
+      "properties": {
+        "questionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bankId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "correctIndex": { "type": "integer" },
+        "correctLetter": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+        "explanation": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["questionId", "bankId", "teacherId", "correctIndex", "correctLetter", "createdAt", "updatedAt"]
+    },
+    "GameSession": {
+      "title": "GameSession",
+      "description": "Sesi permainan edukasi 3D dengan kode tautan unik dari guru.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "classId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bankId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "joinCode": { "type": "string", "minLength": 4, "maxLength": 16, "pattern": "^[A-Z0-9]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "subject": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "grade": { "type": "string", "enum": ["10", "11", "12", "Umum"] },
+        "topic": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "difficulty": { "type": "string", "enum": ["Mudah", "Sedang", "Sulit"] },
+        "gameMode": {
+          "type": "string",
+          "enum": [
+            "Quiz Adventure",
+            "Mission Challenge",
+            "Treasure Hunt",
+            "Puzzle Room",
+            "Boss Battle",
+            "Speed Quiz",
+            "Exploration Learning"
+          ]
+        },
+        "worldId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "durationMinutes": { "type": "integer" },
+        "maxAttempts": { "type": "integer" },
+        "questionCount": { "type": "integer" },
+        "totalPoints": { "type": "integer" },
+        "isLinkActive": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["draft", "active", "ended"] },
+        "requireIdentity": { "type": "boolean" },
+        "startsAt": { "type": "string", "format": "date-time" },
+        "endsAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "teacherId", "classId", "bankId", "joinCode", "title", "subject", "grade",
+        "topic", "difficulty", "gameMode", "worldId", "durationMinutes", "maxAttempts",
+        "questionCount", "totalPoints", "isLinkActive", "status", "requireIdentity",
+        "startsAt", "endsAt", "createdAt", "updatedAt"
+      ]
+    },
+    "StudentProgress": {
+      "title": "StudentProgress",
+      "description": "Progres belajar, skor, XP, dan zona terbuka siswa pada suatu sesi.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "studentIdentity": { "type": "string", "maxLength": 40 },
+        "score": { "type": "integer" },
+        "xpEarned": { "type": "integer" },
+        "correctCount": { "type": "integer" },
+        "totalAnswered": { "type": "integer" },
+        "attemptsUsed": { "type": "integer" },
+        "completedQuests": { "type": "array" },
+        "unlockedZones": { "type": "array" },
+        "currentZone": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "sessionId", "studentId", "teacherId", "studentName", "score", "xpEarned",
+        "correctCount", "totalAnswered", "attemptsUsed", "completedQuests", "unlockedZones",
+        "currentZone", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Rekaman jawaban siswa per soal yang diverifikasi oleh backend.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "questionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "selectedIndex": { "type": "integer" },
+        "isCorrect": { "type": "boolean" },
+        "pointsEarned": { "type": "integer" },
+        "xpEarned": { "type": "integer" },
+        "attemptNumber": { "type": "integer" },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "sessionId", "studentId", "teacherId", "questionId", "selectedIndex",
+        "isCorrect", "pointsEarned", "xpEarned", "attemptNumber", "submittedAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Entri papan peringkat siswa per sesi.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "score": { "type": "integer" },
+        "xp": { "type": "integer" },
+        "level": { "type": "integer" },
+        "accuracy": { "type": "integer" },
+        "isPublicInSession": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sessionId", "studentId", "teacherId", "studentName", "score", "xp", "level", "accuracy", "isPublicInSession", "updatedAt"]
+    },
+    "Achievement": {
+      "title": "Achievement",
+      "description": "Lencana pencapaian siswa.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "badgeCode": { "type": "string", "minLength": 2, "maxLength": 40, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 240 },
+        "xpBonus": { "type": "integer" },
+        "unlockedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "badgeCode", "title", "description", "xpBonus", "unlockedAt"]
+    },
+    "GameWorld": {
+      "title": "GameWorld",
+      "description": "Konfigurasi peta dunia 3D Eduverse.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "theme": { "type": "string", "maxLength": 60 },
+        "zones": { "type": "array" },
+        "npcCount": { "type": "integer" },
+        "isPublished": { "type": "boolean" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "theme", "zones", "npcCount", "isPublished", "createdBy", "createdAt"]
+    },
+    "PlayerState": {
+      "title": "PlayerState",
+      "description": "Status posisi dan animasi avatar pemain untuk sinkronisasi multiplayer realtime.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "avatarColor": { "type": "string", "maxLength": 20 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "rotY": { "type": "number" },
+        "animState": { "type": "string", "enum": ["idle", "walk", "run", "jump", "interact"] },
+        "currentZone": { "type": "string", "maxLength": 60 },
+        "isOnline": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sessionId", "studentId", "displayName", "avatarColor", "x", "y", "z", "rotY", "animState", "currentZone", "isOnline", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Catatan aktivitas penting untuk keamanan dan akuntabilitas.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorRole": { "type": "string", "enum": ["super_admin", "guru", "siswa"] },
+        "action": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "targetType": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "actorId", "actorRole", "action", "targetType", "targetId", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Profil publik pengguna Eduverse."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Informasi PII terisolasi milik pengguna."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Registri admin sistem."
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/Classroom" },
+      "description": "Daftar kelas yang dikelola guru."
+    },
+    "/questionBanks/{bankId}": {
+      "schema": { "$ref": "#/entities/QuestionBank" },
+      "description": "Bank soal milik guru."
+    },
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Daftar soal tanpa kunci jawaban."
+    },
+    "/answerKeys/{questionId}": {
+      "schema": { "$ref": "#/entities/AnswerKey" },
+      "description": "Kunci jawaban terpisah yang terlarang diakses siswa."
+    },
+    "/gameSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/GameSession" },
+      "description": "Sesi permainan dan konfigurasi tautan undangan."
+    },
+    "/studentProgress/{progressId}": {
+      "schema": { "$ref": "#/entities/StudentProgress" },
+      "description": "Progres belajar siswa dalam sesi permainan."
+    },
+    "/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Rekaman jawaban siswa per pertanyaan."
+    },
+    "/leaderboard/{entryId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Peringkat skor siswa dalam sesi."
+    },
+    "/achievements/{achievementId}": {
+      "schema": { "$ref": "#/entities/Achievement" },
+      "description": "Lencana prestasi siswa."
+    },
+    "/gameWorlds/{worldId}": {
+      "schema": { "$ref": "#/entities/GameWorld" },
+      "description": "Definisi dunia 3D dan zona belajar."
+    },
+    "/playerStates/{stateId}": {
+      "schema": { "$ref": "#/entities/PlayerState" },
+      "description": "Posisi avatar pemain secara realtime."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Log audit aktivitas penting sistem."
+    }
+  }
+}

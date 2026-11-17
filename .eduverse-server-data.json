@@ -1,0 +1,606 @@
+{
+  "classes": {
+    "cls_bio_11": {
+      "id": "cls_bio_11",
+      "teacherId": "teacher_demo_1",
+      "name": "XI IPA 1 - Biologi Sel",
+      "grade": "11",
+      "subject": "Biologi",
+      "description": "Kelas interaktif eksplorasi struktur organel dan metabolisme seluler.",
+      "inviteCode": "BIO11A",
+      "isActive": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "cls_fis_10": {
+      "id": "cls_fis_10",
+      "teacherId": "teacher_demo_1",
+      "name": "X MIPA 2 - Dinamika Gerak",
+      "grade": "10",
+      "subject": "Fisika",
+      "description": "Kelas simulasi hukum Newton, usaha, dan kekekalan energi.",
+      "inviteCode": "FIS10B",
+      "isActive": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    }
+  },
+  "questionBanks": {
+    "bank_bio_sel": {
+      "id": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "title": "Struktur & Fungsi Organel Sel",
+      "subject": "Biologi",
+      "grade": "11",
+      "topic": "Biologi Seluler",
+      "difficulty": "Sedang",
+      "questionCount": 6,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bank_fis_newton": {
+      "id": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "title": "Hukum Newton & Energi Mekanik",
+      "subject": "Fisika",
+      "grade": "10",
+      "topic": "Mekanika Klasik",
+      "difficulty": "Sedang",
+      "questionCount": 6,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    }
+  },
+  "questions": {
+    "bio_q1": {
+      "id": "bio_q1",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 0,
+      "prompt": "Apa fungsi utama organel mitokondria pada sel eukariotik?",
+      "options": [
+        "Sintesis protein dari asam amino",
+        "Menghasilkan energi ATP melalui respirasi seluler",
+        "Mengatur keluar masuknya zat pada membran sel",
+        "Menyimpan informasi genetik DNA inti"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Ingat proses respirasi aerobik yang menghasilkan ATP.",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q2": {
+      "id": "bio_q2",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 1,
+      "prompt": "Organel yang berfungsi langsung dalam proses sintesis protein adalah...",
+      "options": [
+        "Ribosom",
+        "Lisosom",
+        "Vakuola",
+        "Kloroplas"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Organel kecil yang menempel pada RE kasar atau bebas di sitoplasma.",
+      "zoneId": "taman",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q3": {
+      "id": "bio_q3",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 2,
+      "prompt": "Perbedaan utama sel tumbuhan dibandingkan sel hewan adalah keberadaan...",
+      "options": [
+        "Mitokondria dan ribosom",
+        "Membran plasma dan sitoplasma",
+        "Dinding sel selulosa dan kloroplas",
+        "Nukleus dan retikulum endoplasma"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Struktur yang membuat tumbuhan kokoh dan mampu berfotosintesis.",
+      "zoneId": "lab",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q4": {
+      "id": "bio_q4",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 3,
+      "prompt": "Proses perpindahan molekul air melalui membran semipermeabel dari konsentrasi air tinggi ke rendah disebut...",
+      "options": [
+        "Transpor aktif",
+        "Osmosis",
+        "Endositosis",
+        "Fagositosis"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Merupakan bentuk difusi khusus untuk pelarut air.",
+      "zoneId": "perpustakaan",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q5": {
+      "id": "bio_q5",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 4,
+      "prompt": "Organel yang berperan sebagai pencerna intraseluler menggunakan enzim hidrolitik adalah...",
+      "options": [
+        "Badan Golgi",
+        "Peroksisom",
+        "Lisosom",
+        "Sentrosom"
+      ],
+      "points": 20,
+      "difficulty": "Sulit",
+      "hint": "Sering disebut organel \"daur ulang\" pada sel hewan.",
+      "zoneId": "pulau",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q6": {
+      "id": "bio_q6",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 5,
+      "prompt": "Pada tahap manakah pembelahan mitosis kromatid saudara berpisah menuju kutub berlawanan?",
+      "options": [
+        "Profase",
+        "Metafase",
+        "Anafase",
+        "Telofase"
+      ],
+      "points": 25,
+      "difficulty": "Sulit",
+      "hint": "Urutannya PMAT — fase ketiga setelah kromosom berjajar di ekuator.",
+      "zoneId": "arena",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q1": {
+      "id": "fis_q1",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 0,
+      "prompt": "Sebuah benda bermassa 4 kg diberi gaya total 20 N. Berapakah percepatan benda tersebut?",
+      "options": [
+        "2 m/s²",
+        "4 m/s²",
+        "5 m/s²",
+        "80 m/s²"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Gunakan rumus F = m × a.",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q2": {
+      "id": "fis_q2",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 1,
+      "prompt": "Sifat benda yang cenderung mempertahankan keadaan diam atau gerak lurus beraturan disebut...",
+      "options": [
+        "Momentum",
+        "Inersia (Kelembaman)",
+        "Impuls",
+        "Gaya Gesek"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Berkaitan dengan Hukum I Newton.",
+      "zoneId": "taman",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q3": {
+      "id": "fis_q3",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 2,
+      "prompt": "Jika kecepatan suatu benda menjadi 2 kali lipat, maka energi kinetiknya menjadi...",
+      "options": [
+        "2 kali semula",
+        "3 kali semula",
+        "4 kali semula",
+        "Setengah semula"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Perhatikan pangkat pada variabel kecepatan v di rumus Ek.",
+      "zoneId": "lab",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q4": {
+      "id": "fis_q4",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 3,
+      "prompt": "Sebuah bola bermassa 2 kg berada di ketinggian 10 m (g = 10 m/s²). Energi potensial gravitasinya adalah...",
+      "options": [
+        "20 J",
+        "100 J",
+        "200 J",
+        "400 J"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "hint": "Kalikan massa, percepatan gravitasi, dan ketinggian.",
+      "zoneId": "perpustakaan",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q5": {
+      "id": "fis_q5",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 4,
+      "prompt": "Pasangan gaya aksi-reaksi pada Hukum III Newton bekerja pada...",
+      "options": [
+        "Satu benda yang sama dengan arah sama",
+        "Dua benda berbeda dengan besar sama dan arah berlawanan",
+        "Dua benda berbeda dengan besar berbeda",
+        "Benda yang hanya bergerak melingkar"
+      ],
+      "points": 20,
+      "difficulty": "Sulit",
+      "hint": "Misalnya kaki mendorong lantai, dan lantai mendorong kaki.",
+      "zoneId": "pulau",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q6": {
+      "id": "fis_q6",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 5,
+      "prompt": "Usaha yang dilakukan oleh gaya 15 N untuk memindahkan kotak sejauh 4 m searah gaya adalah...",
+      "options": [
+        "19 J",
+        "30 J",
+        "60 J",
+        "75 J"
+      ],
+      "points": 25,
+      "difficulty": "Sulit",
+      "hint": "Usaha adalah hasil kali gaya dengan perpindahan searah.",
+      "zoneId": "arena",
+      "isPublished": true,
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    }
+  },
+  "answerKeys": {
+    "bio_q1": {
+      "questionId": "bio_q1",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "Mitokondria disebut \"powerhouse of the cell\" karena menghasilkan ATP melalui siklus Krebs dan fosforilasi oksidatif.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q2": {
+      "questionId": "bio_q2",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 0,
+      "correctLetter": "A",
+      "explanation": "Ribosom membaca kode mRNA untuk merangkai asam amino menjadi rantai polipeptida (protein).",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q3": {
+      "questionId": "bio_q3",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "Sel tumbuhan memiliki dinding sel yang kaku dari selulosa serta kloroplas untuk fotosintesis.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q4": {
+      "questionId": "bio_q4",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "Osmosis adalah difusi khusus pelarut (air) melintasi membran semipermeabel tanpa energi ATP.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q5": {
+      "questionId": "bio_q5",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "Lisosom mengandung enzim hidrolitik yang memecah makromolekul, organel rusak, maupun patogen.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "bio_q6": {
+      "questionId": "bio_q6",
+      "bankId": "bank_bio_sel",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "Pada fase Anafase, benang spindel memendek dan menarik kromatid saudara ke kutub sel yang berlawanan.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q1": {
+      "questionId": "fis_q1",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "Menurut Hukum II Newton, a = F / m = 20 N / 4 kg = 5 m/s².",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q2": {
+      "questionId": "fis_q2",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "Hukum I Newton menjelaskan kelembaman atau inersia ketika resultan gaya bernilai nol.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q3": {
+      "questionId": "fis_q3",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "Ek = ½ m v². Karena v dikuadratkan, menggandakan v membuat Ek menjadi 2² = 4 kali lipat.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q4": {
+      "questionId": "fis_q4",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "Ep = m × g × h = 2 × 10 × 10 = 200 Joule.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q5": {
+      "questionId": "fis_q5",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "Gaya aksi-reaksi selalu sama besar, berlawanan arah, dan bekerja pada dua benda yang berinteraksi.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "fis_q6": {
+      "questionId": "fis_q6",
+      "bankId": "bank_fis_newton",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 2,
+      "correctLetter": "C",
+      "explanation": "W = F × s = 15 N × 4 m = 60 Joule.",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    }
+  },
+  "gameSessions": {
+    "sess_edu101": {
+      "id": "sess_edu101",
+      "teacherId": "teacher_demo_1",
+      "classId": "cls_bio_11",
+      "bankId": "bank_bio_sel",
+      "joinCode": "EDU101",
+      "title": "Petualangan Biologi Sel: Misteri Organel",
+      "subject": "Biologi",
+      "grade": "11",
+      "topic": "Biologi Seluler & Mitokondria",
+      "difficulty": "Sedang",
+      "gameMode": "Quiz Adventure",
+      "worldId": "world_eduverse_utama",
+      "durationMinutes": 45,
+      "maxAttempts": 3,
+      "questionCount": 6,
+      "totalPoints": 125,
+      "isLinkActive": true,
+      "status": "active",
+      "requireIdentity": true,
+      "startsAt": "2026-11-17T00:32:33.421Z",
+      "endsAt": "2026-11-24T01:32:33.421Z",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    },
+    "sess_fis202": {
+      "id": "sess_fis202",
+      "teacherId": "teacher_demo_1",
+      "classId": "cls_fis_10",
+      "bankId": "bank_fis_newton",
+      "joinCode": "FIS202",
+      "title": "Arena Tantangan Hukum Newton",
+      "subject": "Fisika",
+      "grade": "10",
+      "topic": "Mekanika & Energi",
+      "difficulty": "Sedang",
+      "gameMode": "Boss Battle",
+      "worldId": "world_eduverse_utama",
+      "durationMinutes": 40,
+      "maxAttempts": 3,
+      "questionCount": 6,
+      "totalPoints": 125,
+      "isLinkActive": true,
+      "status": "active",
+      "requireIdentity": true,
+      "startsAt": "2026-11-17T00:32:33.421Z",
+      "endsAt": "2026-11-24T01:32:33.421Z",
+      "createdAt": "2026-11-17T01:32:33.421Z",
+      "updatedAt": "2026-11-17T01:32:33.421Z"
+    }
+  },
+  "studentProgress": {
+    "prog_sess_edu101_stu_nadiaputri_lc52": {
+      "id": "prog_sess_edu101_stu_nadiaputri_lc52",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_nadiaputri_lc52",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Nadia Putri",
+      "studentIdentity": "20261104",
+      "score": 0,
+      "xpEarned": 0,
+      "correctCount": 0,
+      "totalAnswered": 0,
+      "attemptsUsed": 1,
+      "completedQuests": [],
+      "unlockedZones": [
+        "sekolah",
+        "taman"
+      ],
+      "currentZone": "sekolah",
+      "status": "active",
+      "createdAt": "2026-11-17T01:33:11.434Z",
+      "updatedAt": "2026-11-17T01:33:11.434Z"
+    },
+    "prog_sess_edu101_stu_demo_explorer": {
+      "id": "prog_sess_edu101_stu_demo_explorer",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_demo_explorer",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Penjelajah Eduverse",
+      "studentIdentity": "XI IPA 1",
+      "score": 20,
+      "xpEarned": 57,
+      "correctCount": 1,
+      "totalAnswered": 1,
+      "attemptsUsed": 1,
+      "completedQuests": [
+        "bio_q1"
+      ],
+      "unlockedZones": [
+        "sekolah",
+        "taman",
+        "lab"
+      ],
+      "currentZone": "sekolah",
+      "status": "active",
+      "createdAt": "2026-11-17T01:33:39.889Z",
+      "updatedAt": "2026-11-17T01:38:37.033Z"
+    }
+  },
+  "submissions": {
+    "sub_sess_edu101_stu_demo_explorer_bio_q1_1": {
+      "id": "sub_sess_edu101_stu_demo_explorer_bio_q1_1",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_demo_explorer",
+      "studentName": "Penjelajah Eduverse",
+      "teacherId": "teacher_demo_1",
+      "questionId": "bio_q1",
+      "selectedIndex": 1,
+      "isCorrect": true,
+      "pointsEarned": 20,
+      "xpEarned": 32,
+      "attemptNumber": 1,
+      "submittedAt": "2026-11-17T01:34:16.360Z"
+    }
+  },
+  "leaderboard": {
+    "lb_sess_edu101_stu_nadiaputri_lc52": {
+      "id": "lb_sess_edu101_stu_nadiaputri_lc52",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_nadiaputri_lc52",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Nadia Putri",
+      "score": 0,
+      "xp": 0,
+      "level": 1,
+      "accuracy": 0,
+      "isPublicInSession": true,
+      "updatedAt": "2026-11-17T01:33:11.434Z"
+    },
+    "lb_sess_edu101_stu_demo_explorer": {
+      "id": "lb_sess_edu101_stu_demo_explorer",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_demo_explorer",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Penjelajah Eduverse",
+      "score": 20,
+      "xp": 57,
+      "level": 1,
+      "accuracy": 100,
+      "isPublicInSession": true,
+      "updatedAt": "2026-11-17T01:34:16.360Z"
+    }
+  },
+  "achievements": {
+    "ach_stu_demo_explorer_FIRST_SPARK": {
+      "id": "ach_stu_demo_explorer_FIRST_SPARK",
+      "studentId": "stu_demo_explorer",
+      "badgeCode": "FIRST_SPARK",
+      "title": "Langkah Pertama",
+      "description": "Menjawab 1 soal misi dengan benar.",
+      "xpBonus": 25,
+      "unlockedAt": "2026-11-17T01:34:16.360Z"
+    }
+  },
+  "auditLogs": [
+    {
+      "id": "log_1794879219889_apuvf",
+      "actorId": "stu_demo_explorer",
+      "actorRole": "siswa",
+      "action": "JOIN_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_edu101",
+      "summary": "Penjelajah Eduverse bergabung ke sesi EDU101",
+      "createdAt": "2026-11-17T01:33:39.889Z"
+    },
+    {
+      "id": "log_1794879191434_ycubp",
+      "actorId": "stu_nadiaputri_lc52",
+      "actorRole": "siswa",
+      "action": "JOIN_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_edu101",
+      "summary": "Nadia Putri bergabung ke sesi EDU101",
+      "createdAt": "2026-11-17T01:33:11.434Z"
+    },
+    {
+      "id": "log_seed_1",
+      "actorId": "teacher_demo_1",
+      "actorRole": "guru",
+      "action": "SESSION_INITIALIZED",
+      "targetType": "gameSession",
+      "targetId": "sess_edu101",
+      "summary": "Sesi awal EDU101 dan FIS202 siap digunakan untuk kelas 10–12.",
+      "createdAt": "2026-11-17T01:32:33.421Z"
+    }
+  ]
+}
