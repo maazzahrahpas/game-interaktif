@@ -67,6 +67,16 @@ const GAME_MODES: GameMode[] = [
   'Exploration Learning',
 ];
 
+async function readApiResponse<T>(res: Response): Promise<{ data: T | null; rawText: string }> {
+  const rawText = await res.text();
+  if (!rawText) return { data: null, rawText: '' };
+  try {
+    return { data: JSON.parse(rawText) as T, rawText };
+  } catch {
+    return { data: null, rawText };
+  }
+}
+
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   user,
   darkMode,
@@ -136,9 +146,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setErrorMsg(null);
     try {
       const res = await fetch(`/api/teacher/overview?teacherId=${encodeURIComponent(user.uid)}`);
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.error || 'Gagal memuat data dashboard guru.');
+      const { data } = await readApiResponse<{
+        ok: boolean;
+        error?: string;
+        classes?: Classroom[];
+        questionBanks?: QuestionBank[];
+        questions?: StudentQuestion[];
+        answerKeys?: AnswerKey[];
+        gameSessions?: GameSession[];
+        studentProgress?: StudentProgress[];
+        submissions?: SubmissionRecord[];
+        auditLogs?: AuditLogEntry[];
+      }>(res);
+      if (!res.ok || !data?.ok) {
+        setErrorMsg(data?.error || `Gagal memuat data dashboard guru (HTTP ${res.status}).`);
         return;
       }
       setClasses(data.classes || []);
@@ -150,15 +171,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setSubmissions(data.submissions || []);
       setAuditLogs(data.auditLogs || []);
 
-      if (!sessClassId && data.classes?.length) setSessClassId(data.classes[0].id);
-      if (!sessBankId && data.questionBanks?.length) setSessBankId(data.questionBanks[0].id);
-      if (!monitorSessionId && data.gameSessions?.length) setMonitorSessionId(data.gameSessions[0].id);
+      if (data.classes?.length) {
+        const firstClassId = data.classes[0].id;
+        setSessClassId((prev) => prev || firstClassId);
+      }
+      if (data.questionBanks?.length) {
+        const firstBankId = data.questionBanks[0].id;
+        setSessBankId((prev) => prev || firstBankId);
+      }
+      if (data.gameSessions?.length) {
+        const firstSessId = data.gameSessions[0].id;
+        setMonitorSessionId((prev) => prev || firstSessId);
+      }
     } catch {
       setErrorMsg('Kesalahan jaringan saat mengambil data dashboard guru.');
     } finally {
       setLoading(false);
     }
-  }, [user.uid, sessClassId, sessBankId, monitorSessionId]);
+  }, [user.uid]);
 
   useEffect(() => {
     void loadOverview();
@@ -226,13 +256,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           description: clsDesc.trim(),
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.error || 'Gagal membuat kelas.');
+      const { data } = await readApiResponse<{ ok: boolean; error?: string; classroom?: Classroom }>(res);
+      if (!res.ok || !data?.ok || !data.classroom) {
+        setErrorMsg(data?.error || `Gagal membuat kelas (HTTP ${res.status}).`);
         return;
       }
       await syncClassToFirestore(data.classroom).catch(() => undefined);
-      setClasses((prev) => [data.classroom, ...prev]);
+      setClasses((prev) => [data.classroom!, ...prev]);
       setSessClassId(data.classroom.id);
       setClsName('');
       setClsDesc('');
@@ -270,13 +300,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           endsAt: new Date(sessEndsAt).toISOString(),
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.error || 'Gagal membuat sesi permainan.');
+      const { data } = await readApiResponse<{ ok: boolean; error?: string; session?: GameSession }>(res);
+      if (!res.ok || !data?.ok || !data.session) {
+        setErrorMsg(data?.error || `Gagal membuat sesi permainan (HTTP ${res.status}).`);
         return;
       }
       await syncSessionToFirestore(data.session).catch(() => undefined);
-      setSessions((prev) => [data.session, ...prev]);
+      setSessions((prev) => [data.session!, ...prev]);
       setMonitorSessionId(data.session.id);
       setSessTitle('');
       showNotice(`Sesi "${data.session.title}" aktif dengan kode ${data.session.joinCode}!`);
@@ -294,10 +324,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isLinkActive: !s.isLinkActive }),
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        setSessions((prev) => prev.map((item) => (item.id === s.id ? data.session : item)));
+      const { data } = await readApiResponse<{ ok: boolean; error?: string; session?: GameSession }>(res);
+      if (res.ok && data?.ok && data.session) {
+        setSessions((prev) => prev.map((item) => (item.id === s.id ? data.session! : item)));
         showNotice(`Tautan ${s.joinCode} ${data.session.isLinkActive ? 'diaktifkan' : 'dinonaktifkan'}.`);
+      } else {
+        setErrorMsg(data?.error || 'Gagal mengubah status tautan sesi.');
       }
     } catch {
       setErrorMsg('Gagal mengubah status tautan sesi.');
@@ -311,10 +343,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'ended', isLinkActive: false }),
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        setSessions((prev) => prev.map((item) => (item.id === s.id ? data.session : item)));
+      const { data } = await readApiResponse<{ ok: boolean; error?: string; session?: GameSession }>(res);
+      if (res.ok && data?.ok && data.session) {
+        setSessions((prev) => prev.map((item) => (item.id === s.id ? data.session! : item)));
         showNotice(`Sesi ${s.joinCode} telah diakhiri.`);
+      } else {
+        setErrorMsg(data?.error || 'Gagal mengakhiri sesi.');
       }
     } catch {
       setErrorMsg('Gagal mengakhiri sesi.');
@@ -326,6 +360,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.docx')) {
       setErrorMsg('Format berkas harus Microsoft Word (.docx).');
+      e.target.value = '';
       return;
     }
     setParsingWord(true);
@@ -334,14 +369,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       const parsed = await extractDocxFile(file);
       setPreviewQuestions(parsed.questions);
       setParseWarnings(parsed.warnings);
-      if (!bankTitle) {
-        setBankTitle(file.name.replace(/\.docx$/i, ''));
+      if (!bankTitle.trim()) {
+        setBankTitle(file.name.replace(/\.docx$/i, '').trim() || 'Bank Soal Word');
       }
       showNotice(`Berhasil membaca ${parsed.questions.length} soal dari ${file.name}. Silakan tinjau sebelum menyimpan.`);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Gagal membaca dokumen .docx.');
     } finally {
       setParsingWord(false);
+      e.target.value = '';
     }
   };
 
@@ -353,6 +389,26 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     a.download = 'Template_Soal_EDUVERSE.docx';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleAddManualQuestion = () => {
+    setErrorMsg(null);
+    setPreviewQuestions((prev) => [
+      ...prev,
+      {
+        tempId: `manual_q_${Date.now()}_${prev.length}`,
+        orderIndex: prev.length,
+        prompt: '',
+        options: ['', '', '', ''],
+        correctIndex: 0,
+        correctLetter: 'A',
+        explanation: '',
+        points: 20,
+        difficulty: bankDifficulty,
+        missingAnswerKey: false,
+        warnings: [],
+      },
+    ]);
   };
 
   const handleGenerateAiQuestions = async () => {
@@ -373,29 +429,45 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           },
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.error || 'Gagal membuat variasi soal AI.');
+      const { data } = await readApiResponse<{
+        ok: boolean;
+        error?: string;
+        items?: Array<{
+          prompt: string;
+          options: string[];
+          correctIndex: number;
+          explanation?: string;
+          points?: number;
+        }>;
+      }>(res);
+      if (!res.ok || !data?.ok) {
+        setErrorMsg(data?.error || `Gagal membuat variasi soal AI (HTTP ${res.status}).`);
         return;
       }
       const letters = ['A', 'B', 'C', 'D', 'E'] as const;
-      const drafts: ParsedWordQuestion[] = (data.items || []).map(
-        (item: { prompt: string; options: string[]; correctIndex: number; explanation?: string; points?: number }, idx: number) => ({
+      const drafts: ParsedWordQuestion[] = (data.items || []).map((item, idx) => {
+        const cleanOpts = (Array.isArray(item.options) ? item.options : [])
+          .map((o) => String(o ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 5);
+        const safeOptions = cleanOpts.length >= 2 ? cleanOpts : ['Opsi A', 'Opsi B'];
+        const safeIdx = Math.min(Math.max(0, Math.trunc(Number(item.correctIndex) || 0)), safeOptions.length - 1);
+        return {
           tempId: `ai_q_${Date.now()}_${idx}`,
           orderIndex: previewQuestions.length + idx,
-          prompt: item.prompt,
-          options: item.options,
-          correctIndex: item.correctIndex,
-          correctLetter: letters[item.correctIndex] || 'A',
-          explanation: item.explanation || '',
-          points: item.points || 20,
+          prompt: String(item.prompt || '').trim(),
+          options: safeOptions,
+          correctIndex: safeIdx,
+          correctLetter: letters[safeIdx] || 'A',
+          explanation: String(item.explanation || '').trim(),
+          points: Math.min(1000, Math.max(1, Math.round(Number(item.points) || 20))),
           difficulty: bankDifficulty,
           missingAnswerKey: false,
           warnings: [],
-        })
-      );
+        };
+      });
       setPreviewQuestions((prev) => [...prev, ...drafts]);
-      if (!bankTitle) setBankTitle(`Bank Soal AI: ${aiTopicInput}`);
+      if (!bankTitle.trim()) setBankTitle(`Bank Soal AI: ${aiTopicInput}`);
       showNotice(`${drafts.length} draf soal AI ditambahkan ke pratinjau. Tinjau dan setujui sebelum disimpan.`);
     } catch {
       setErrorMsg('Gagal menghubungi layanan AI Gemini.');
@@ -425,14 +497,54 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setErrorMsg('Belum ada soal di daftar pratinjau.');
       return;
     }
-    const missing = previewQuestions.filter((q) => q.missingAnswerKey || q.correctIndex < 0);
-    if (missing.length > 0) {
-      setErrorMsg(`Masih ada ${missing.length} soal tanpa kunci jawaban. Lengkapi kunci jawaban terlebih dahulu.`);
+    const cleanTitle = bankTitle.trim();
+    const cleanSubject = bankSubject.trim();
+    const cleanTopic = bankTopic.trim() || cleanTitle;
+
+    if (cleanTitle.length < 2) {
+      setErrorMsg('Judul Bank Soal wajib diisi minimal 2 karakter.');
       return;
     }
-    if (bankTitle.trim().length < 2) {
-      setErrorMsg('Judul Bank Soal wajib diisi.');
+    if (cleanSubject.length < 2) {
+      setErrorMsg('Mata Pelajaran wajib diisi minimal 2 karakter.');
       return;
+    }
+
+    const sanitizedItems: Array<{
+      prompt: string;
+      options: string[];
+      correctIndex: number;
+      explanation: string;
+      points: number;
+      difficulty: DifficultyLevel;
+    }> = [];
+
+    for (let i = 0; i < previewQuestions.length; i++) {
+      const q = previewQuestions[i];
+      const prompt = String(q.prompt || '').trim();
+      if (prompt.length < 2) {
+        setErrorMsg(`Teks pertanyaan pada Soal #${i + 1} wajib diisi minimal 2 karakter.`);
+        return;
+      }
+      const cleanOptions = (Array.isArray(q.options) ? q.options : [])
+        .slice(0, 5)
+        .map((opt) => String(opt || '').trim());
+      if (cleanOptions.length < 2 || cleanOptions.some((opt) => opt.length === 0)) {
+        setErrorMsg(`Semua pilihan jawaban pada Soal #${i + 1} wajib diisi (minimal 2 opsi).`);
+        return;
+      }
+      if (q.missingAnswerKey || q.correctIndex < 0 || q.correctIndex >= cleanOptions.length) {
+        setErrorMsg(`Kunci jawaban pada Soal #${i + 1} belum valid. Pilih opsi A–${String.fromCharCode(64 + cleanOptions.length)}.`);
+        return;
+      }
+      sanitizedItems.push({
+        prompt,
+        options: cleanOptions,
+        correctIndex: q.correctIndex,
+        explanation: String(q.explanation || '').trim(),
+        points: Math.min(1000, Math.max(1, Math.round(Number(q.points) || 20))),
+        difficulty: q.difficulty || bankDifficulty,
+      });
     }
 
     setSavingBank(true);
@@ -443,27 +555,31 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           teacherId: user.uid,
-          title: bankTitle.trim(),
-          subject: bankSubject.trim(),
+          title: cleanTitle,
+          subject: cleanSubject,
           grade: bankGrade,
-          topic: bankTopic.trim(),
+          topic: cleanTopic,
           difficulty: bankDifficulty,
-          items: previewQuestions.map((q) => ({
-            prompt: q.prompt,
-            options: q.options,
-            correctIndex: q.correctIndex,
-            explanation: q.explanation,
-            points: q.points,
-            difficulty: q.difficulty,
-          })),
+          items: sanitizedItems,
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.error || 'Gagal menyimpan bank soal.');
+      const { data, rawText } = await readApiResponse<{
+        ok: boolean;
+        error?: string;
+        bank: QuestionBank;
+        questions: StudentQuestion[];
+        answerKeys: AnswerKey[];
+      }>(res);
+      if (!res.ok || !data?.ok || !data.bank) {
+        setErrorMsg(
+          data?.error ||
+            `Gagal menyimpan bank soal (HTTP ${res.status}${rawText ? `: ${rawText.slice(0, 120)}` : ''}).`
+        );
         return;
       }
-      await syncBankToFirestore(data.bank, data.questions, data.answerKeys).catch(() => undefined);
+      await syncBankToFirestore(data.bank, data.questions, data.answerKeys).catch((err) => {
+        console.warn('Sinkronisasi Firestore bank soal dilewati/gagal:', err);
+      });
       setBanks((prev) => [data.bank, ...prev]);
       setQuestions((prev) => [...prev, ...data.questions]);
       setAnswerKeys((prev) => [...prev, ...data.answerKeys]);
@@ -472,8 +588,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setParseWarnings([]);
       setBankTitle('');
       showNotice(`Bank soal "${data.bank.title}" (${data.questions.length} soal) tersimpan dengan kunci jawaban terisolasi!`);
-    } catch {
-      setErrorMsg('Gagal menyimpan bank soal ke server.');
+    } catch (err) {
+      const detail = err instanceof Error && err.message ? ` (${err.message})` : '';
+      setErrorMsg(`Gagal terhubung ke server saat menyimpan bank soal${detail}.`);
     } finally {
       setSavingBank(false);
     }
@@ -1038,14 +1155,24 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         Unggah berkas .docx berisi soal, opsi A–E, Kunci Jawaban, dan Pembahasan. Tinjau pratinjau sebelum menyimpan.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleDownloadTemplate}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold"
-                    >
-                      <Download className="w-4 h-4 text-blue-600" />
-                      Unduh Template Word (.docx)
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAddManualQuestion}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Tambah Soal Manual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDownloadTemplate}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold"
+                      >
+                        <Download className="w-4 h-4 text-blue-600" />
+                        Unduh Template Word (.docx)
+                      </button>
+                    </div>
                   </div>
 
                   <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1145,15 +1272,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           Edit teks, opsi, bobot, atau kunci jawaban sebelum disimpan. Kunci jawaban akan disimpan terpisah dari akses siswa.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        disabled={savingBank}
-                        onClick={handleSavePreviewToBank}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50"
-                      >
-                        {savingBank && <Loader2 className="w-4 h-4 animate-spin" />}
-                        Setujui & Simpan ke Bank Soal
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleAddManualQuestion}
+                          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Tambah Butir Soal
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingBank}
+                          onClick={handleSavePreviewToBank}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50"
+                        >
+                          {savingBank && <Loader2 className="w-4 h-4 animate-spin" />}
+                          Setujui & Simpan ke Bank Soal
+                        </button>
+                      </div>
                     </div>
 
                     {parseWarnings.length > 0 && (
@@ -1167,7 +1304,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
                       <div className="sm:col-span-2">
                         <label htmlFor="bank-title" className="block text-xs font-semibold mb-1">
                           Judul Bank Soal
@@ -1194,6 +1331,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         />
                       </div>
                       <div>
+                        <label htmlFor="bank-topic" className="block text-xs font-semibold mb-1">
+                          Topik Materi
+                        </label>
+                        <input
+                          id="bank-topic"
+                          type="text"
+                          value={bankTopic}
+                          onChange={(e) => setBankTopic(e.target.value)}
+                          placeholder="Contoh: Sel & Organel"
+                          className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3.5 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
                         <label htmlFor="bank-grade" className="block text-xs font-semibold mb-1">
                           Kelas
                         </label>
@@ -1206,6 +1356,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           <option value="10">Kelas 10</option>
                           <option value="11">Kelas 11</option>
                           <option value="12">Kelas 12</option>
+                          <option value="Umum">Umum</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="bank-diff" className="block text-xs font-semibold mb-1">
+                          Kesulitan
+                        </label>
+                        <select
+                          id="bank-diff"
+                          value={bankDifficulty}
+                          onChange={(e) => setBankDifficulty(e.target.value as DifficultyLevel)}
+                          className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3.5 py-2 text-sm"
+                        >
+                          <option value="Mudah">Mudah</option>
+                          <option value="Sedang">Sedang</option>
+                          <option value="Sulit">Sulit</option>
                         </select>
                       </div>
                     </div>
@@ -1254,6 +1420,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
                           <textarea
                             rows={2}
+                            aria-label={`Teks pertanyaan soal ${idx + 1}`}
+                            placeholder="Tulis teks pertanyaan di sini..."
                             value={q.prompt}
                             onChange={(e) => updatePreviewItem(q.tempId, { prompt: e.target.value })}
                             className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
@@ -1267,6 +1435,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                                   <span className="w-6 text-xs font-mono font-bold">{letter}.</span>
                                   <input
                                     type="text"
+                                    aria-label={`Opsi ${letter} soal ${idx + 1}`}
+                                    placeholder={`Pilihan ${letter}`}
                                     value={opt}
                                     onChange={(e) => {
                                       const nextOpts = [...q.options];
@@ -1284,6 +1454,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                             <div>
                               <label className="block text-xs font-semibold mb-1">Kunci Jawaban</label>
                               <select
+                                aria-label={`Kunci jawaban soal ${idx + 1}`}
                                 value={q.correctIndex}
                                 onChange={(e) =>
                                   updatePreviewItem(q.tempId, { correctIndex: Number(e.target.value) })

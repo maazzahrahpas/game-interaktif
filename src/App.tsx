@@ -7,7 +7,7 @@ import { TeacherDashboard } from './components/TeacherDashboard.tsx';
 import { StudentDashboard } from './components/StudentDashboard.tsx';
 import type { EduverseUser, StudentProgress } from './types/eduverse.ts';
 import {
-  ensureUserProfile,
+  fetchExistingUserProfile,
   signInWithGoogleRole,
   signOutFirebase,
   subscribeAuthState,
@@ -81,13 +81,15 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  // Subscribe to Firebase Auth session (without overriding explicit /join/:code or ?autostart=1)
+  // Subscribe to Firebase Auth session (only hydrate existing profiles; signInWithGoogleRole creates new ones with chosen role)
   useEffect(() => {
     const unsub = subscribeAuthState((fbUser) => {
       if (!fbUser) return;
-      void ensureUserProfile(fbUser, 'siswa')
+      void fetchExistingUserProfile(fbUser)
         .then((profile) => {
-          setCurrentUser(profile);
+          if (profile) {
+            setCurrentUser(profile);
+          }
         })
         .catch(() => {
           // Ignore silent profile refresh errors if offline or unauthenticated

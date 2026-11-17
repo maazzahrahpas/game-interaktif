@@ -20,7 +20,7 @@ const PORT = Number(process.env.PORT || 3000);
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '4mb' }));
+  app.use(express.json({ limit: '16mb' }));
 
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -242,43 +242,85 @@ async function startServer() {
   });
 
   app.post('/api/teacher/classes', (req, res) => {
-    const { teacherId, name, grade, subject, description } = req.body || {};
-    if (!name || !subject || !grade) {
-      return res.status(400).json({ ok: false, error: 'Nama kelas, tingkat, dan mata pelajaran wajib diisi.' });
+    try {
+      const { teacherId, name, grade, subject, description } = req.body || {};
+      if (!name || !subject || !grade) {
+        return res.status(400).json({ ok: false, error: 'Nama kelas, tingkat, dan mata pelajaran wajib diisi.' });
+      }
+      const classroom = serverStore.createClassroom({
+        teacherId: String(teacherId || 'teacher_demo_1'),
+        name: String(name),
+        grade,
+        subject: String(subject),
+        description: description ? String(description) : undefined,
+      });
+      return res.json({ ok: true, classroom });
+    } catch (err) {
+      return res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Gagal membuat kelas di server.',
+      });
     }
-    const classroom = serverStore.createClassroom({
-      teacherId: String(teacherId || 'teacher_demo_1'),
-      name: String(name),
-      grade,
-      subject: String(subject),
-      description: description ? String(description) : undefined,
-    });
-    return res.json({ ok: true, classroom });
   });
 
   app.post('/api/teacher/banks', (req, res) => {
-    const { teacherId, title, subject, grade, topic, difficulty, items } = req.body || {};
-    if (!title || !subject || !topic || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ ok: false, error: 'Judul, mata pelajaran, topik, dan minimal 1 soal wajib diisi.' });
-    }
-    for (const item of items) {
-      if (!item.prompt || !Array.isArray(item.options) || item.options.length < 2 || typeof item.correctIndex !== 'number' || item.correctIndex < 0) {
+    try {
+      const { teacherId, title, subject, grade, topic, difficulty, items } = req.body || {};
+      const cleanTitle = String(title ?? '').trim();
+      const cleanSubject = String(subject ?? '').trim();
+      const cleanTopic = String(topic ?? '').trim() || cleanTitle;
+
+      if (cleanTitle.length < 2 || cleanSubject.length < 2 || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
           ok: false,
-          error: 'Semua soal harus memiliki pertanyaan, minimal 2 opsi, dan kunci jawaban yang valid.',
+          error: 'Judul bank soal, mata pelajaran, dan minimal 1 soal wajib diisi.',
         });
       }
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const promptText = String(item?.prompt ?? '').trim();
+        const rawOptions = Array.isArray(item?.options) ? item.options.slice(0, 5) : [];
+        const validOptions = rawOptions.map((o: unknown) => String(o ?? '').trim());
+        const correctIdx = Number(item?.correctIndex);
+
+        if (promptText.length < 2) {
+          return res.status(400).json({
+            ok: false,
+            error: `Teks pertanyaan pada Soal #${i + 1} wajib diisi minimal 2 karakter.`,
+          });
+        }
+        if (validOptions.length < 2 || validOptions.some((o: string) => o.length === 0)) {
+          return res.status(400).json({
+            ok: false,
+            error: `Semua pilihan jawaban pada Soal #${i + 1} wajib diisi (minimal 2 opsi).`,
+          });
+        }
+        if (!Number.isInteger(correctIdx) || correctIdx < 0 || correctIdx >= validOptions.length) {
+          return res.status(400).json({
+            ok: false,
+            error: `Kunci jawaban pada Soal #${i + 1} tidak valid.`,
+          });
+        }
+      }
+
+      const created = serverStore.createQuestionBankWithQuestions({
+        teacherId: String(teacherId || 'teacher_demo_1'),
+        title: cleanTitle,
+        subject: cleanSubject,
+        grade: grade || '11',
+        topic: cleanTopic,
+        difficulty: difficulty || 'Sedang',
+        items,
+      });
+      return res.json({ ok: true, ...created });
+    } catch (err) {
+      console.error('Error saving question bank:', err);
+      return res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Gagal menyimpan bank soal di server.',
+      });
     }
-    const created = serverStore.createQuestionBankWithQuestions({
-      teacherId: String(teacherId || 'teacher_demo_1'),
-      title: String(title),
-      subject: String(subject),
-      grade: grade || '11',
-      topic: String(topic),
-      difficulty: difficulty || 'Sedang',
-      items,
-    });
-    return res.json({ ok: true, ...created });
   });
 
   app.post('/api/teacher/sessions', (req, res) => {
@@ -319,15 +361,19 @@ async function startServer() {
   });
 
   app.patch('/api/teacher/sessions/:id', (req, res) => {
-    const updated = serverStore.updateGameSession(req.params.id, req.body || {});
-    if (!updated) {
-      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
+    try {
+      const updated = serverStore.updateGameSession(req.params.id, req.body || {});
+      if (!updated) {
+        return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
+      }
+      broadcastToRoom(updated.id, {
+        type: 'session_state_changed',
+        session: updated,
+      });
+      return res.json({ ok: true, session: updated });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
-    broadcastToRoom(updated.id, {
-      type: 'session_state_changed',
-      session: updated,
-    });
-    return res.json({ ok: true, session: updated });
   });
 
   // ==================== GEMINI AI ROUTES ====================
@@ -379,6 +425,19 @@ async function startServer() {
         error: err instanceof Error ? err.message : 'Gagal menghubungi Tutor AI Gemini.',
       });
     }
+  });
+
+  // Ensure API errors (such as PayloadTooLargeError or malformed JSON) always return JSON instead of HTML
+  app.use('/api', (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status =
+      typeof err === 'object' && err !== null && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+        ? (err as { status: number }).status
+        : 500;
+    const message =
+      err instanceof Error
+        ? err.message
+        : 'Terjadi kesalahan internal pada server API.';
+    return res.status(status).json({ ok: false, error: message });
   });
 
   // ==================== VITE DEV / PROD STATIC SERVING ====================

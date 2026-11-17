@@ -118,6 +118,37 @@ export function subscribeAuthState(cb: (user: FirebaseUser | null) => void) {
   return onAuthStateChanged(auth, cb);
 }
 
+export async function fetchExistingUserProfile(fbUser: FirebaseUser): Promise<EduverseUser | null> {
+  const userPath = `users/${fbUser.uid}`;
+  const userRef = doc(db, 'users', fbUser.uid);
+  try {
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      const isBootAdmin =
+        fbUser.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL && fbUser.emailVerified;
+      if (isBootAdmin) {
+        return ensureUserProfile(fbUser, 'guru');
+      }
+      return null;
+    }
+    const data = snap.data();
+    const displayName = (fbUser.displayName || fbUser.email?.split('@')[0] || 'Pengguna Eduverse').slice(0, 80);
+    return {
+      uid: fbUser.uid,
+      displayName: String(data.displayName || displayName),
+      email: fbUser.email || undefined,
+      role: (data.role as UserRole) || 'siswa',
+      avatarColor: String(data.avatarColor || '#2563EB'),
+      xp: Number(data.xp || 0),
+      level: Number(data.level || 1),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, userPath);
+  }
+}
+
 export async function ensureUserProfile(
   fbUser: FirebaseUser,
   preferredRole: 'guru' | 'siswa' = 'siswa'
@@ -211,13 +242,16 @@ export async function syncBankToFirestore(
   if (!auth.currentUser) return;
   const uid = auth.currentUser.uid;
   try {
+    const safeTitle = (bank.title.trim() || 'Bank Soal').slice(0, 120);
+    const safeSubject = (bank.subject.trim() || 'Umum').slice(0, 80);
+    const safeTopic = (bank.topic.trim() || safeTitle).slice(0, 100);
     await setDoc(doc(db, 'questionBanks', bank.id), {
       id: bank.id,
       teacherId: uid,
-      title: bank.title.slice(0, 120),
-      subject: bank.subject.slice(0, 80),
+      title: safeTitle.length >= 2 ? safeTitle : `${safeTitle} 01`,
+      subject: safeSubject.length >= 2 ? safeSubject : `${safeSubject} 01`,
       grade: bank.grade,
-      topic: bank.topic.slice(0, 100),
+      topic: safeTopic.length >= 2 ? safeTopic : `${safeTopic} 01`,
       difficulty: bank.difficulty,
       questionCount: bank.questionCount,
       createdAt: serverTimestamp(),
@@ -225,14 +259,15 @@ export async function syncBankToFirestore(
     });
 
     for (const q of questions) {
+      const safePrompt = q.prompt.trim().slice(0, 1000);
       await setDoc(doc(db, 'questions', q.id), {
         id: q.id,
         bankId: bank.id,
         teacherId: uid,
         orderIndex: q.orderIndex,
-        prompt: q.prompt.slice(0, 1000),
-        options: q.options.slice(0, 5),
-        points: q.points,
+        prompt: safePrompt.length >= 3 ? safePrompt : `${safePrompt}?`.padEnd(3, '.'),
+        options: q.options.slice(0, 5).map((o) => (o.trim() || '-').slice(0, 300)),
+        points: Math.min(1000, Math.max(1, Math.round(q.points))),
         difficulty: q.difficulty,
         ...(q.hint ? { hint: q.hint.slice(0, 400) } : {}),
         isPublished: q.isPublished,

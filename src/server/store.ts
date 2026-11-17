@@ -737,8 +737,8 @@ class EduverseServerStore {
     title: string;
     subject: string;
     grade: QuestionBank['grade'];
-    topic: string;
-    difficulty: QuestionBank['difficulty'];
+    topic?: string;
+    difficulty?: QuestionBank['difficulty'];
     items: Array<{
       prompt: string;
       options: string[];
@@ -750,18 +750,66 @@ class EduverseServerStore {
     }>;
   }) {
     const nowIso = new Date().toISOString();
-    const bankId = `bank_${Date.now()}`;
+    const bankId = `bank_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const letters = ['A', 'B', 'C', 'D', 'E'] as const;
+
+    const cleanTitle = String(input.title || '').trim().slice(0, 120);
+    const cleanSubject = String(input.subject || '').trim().slice(0, 80);
+    const cleanTopic = (String(input.topic || '').trim() || cleanTitle || 'Umum').slice(0, 100);
+    const validGrades: QuestionBank['grade'][] = ['10', '11', '12', 'Umum'];
+    const cleanGrade: QuestionBank['grade'] = validGrades.includes(input.grade) ? input.grade : '11';
+    const validDiffs: QuestionBank['difficulty'][] = ['Mudah', 'Sedang', 'Sulit'];
+    const cleanDifficulty: QuestionBank['difficulty'] =
+      input.difficulty && validDiffs.includes(input.difficulty) ? input.difficulty : 'Sedang';
+
+    if (cleanTitle.length < 2 || cleanSubject.length < 2) {
+      throw new Error('Judul bank soal dan mata pelajaran minimal 2 karakter.');
+    }
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+      throw new Error('Minimal 1 soal wajib disertakan dalam bank soal.');
+    }
+
+    const normalizedItems = input.items.map((item, idx) => {
+      const prompt = String(item?.prompt ?? '').trim().slice(0, 1000);
+      if (prompt.length < 2) {
+        throw new Error(`Teks pertanyaan pada Soal #${idx + 1} wajib diisi minimal 2 karakter.`);
+      }
+      const rawOptions = Array.isArray(item?.options) ? item.options : [];
+      const cleanOptions = rawOptions
+        .slice(0, 5)
+        .map((o) => String(o ?? '').trim().slice(0, 300));
+      if (cleanOptions.length < 2 || cleanOptions.some((o) => o.length === 0)) {
+        throw new Error(`Soal #${idx + 1} harus memiliki minimal 2 pilihan jawaban yang tidak kosong.`);
+      }
+      const parsedIndex = Math.trunc(Number(item.correctIndex));
+      const safeIndex = Number.isFinite(parsedIndex)
+        ? Math.min(Math.max(0, parsedIndex), cleanOptions.length - 1)
+        : 0;
+      const rawPoints = Math.round(Number(item.points));
+      const safePoints = Number.isFinite(rawPoints) ? Math.min(1000, Math.max(1, rawPoints)) : 20;
+      const itemDiff: QuestionBank['difficulty'] =
+        item.difficulty && validDiffs.includes(item.difficulty) ? item.difficulty : cleanDifficulty;
+
+      return {
+        prompt,
+        cleanOptions,
+        safeIndex,
+        safePoints,
+        itemDiff,
+        hint: item.hint ? String(item.hint).trim().slice(0, 400) : undefined,
+        explanation: item.explanation ? String(item.explanation).trim().slice(0, 1000) : '',
+      };
+    });
 
     const bank: QuestionBank = {
       id: bankId,
-      teacherId: input.teacherId,
-      title: input.title.trim().slice(0, 120),
-      subject: input.subject.trim().slice(0, 80),
-      grade: input.grade,
-      topic: input.topic.trim().slice(0, 100),
-      difficulty: input.difficulty,
-      questionCount: input.items.length,
+      teacherId: String(input.teacherId || 'teacher_demo_1'),
+      title: cleanTitle,
+      subject: cleanSubject,
+      grade: cleanGrade,
+      topic: cleanTopic,
+      difficulty: cleanDifficulty,
+      questionCount: normalizedItems.length,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -770,19 +818,18 @@ class EduverseServerStore {
     const savedQuestions: StudentQuestion[] = [];
     const savedKeys: AnswerKey[] = [];
 
-    input.items.forEach((item, idx) => {
+    normalizedItems.forEach((item, idx) => {
       const qId = `${bankId}_q${idx + 1}`;
-      const safeIndex = Math.min(Math.max(0, item.correctIndex), item.options.length - 1);
       const q: StudentQuestion = {
         id: qId,
         bankId,
-        teacherId: input.teacherId,
+        teacherId: bank.teacherId,
         orderIndex: idx,
-        prompt: item.prompt.trim().slice(0, 1000),
-        options: item.options.slice(0, 5).map((o) => o.trim().slice(0, 300)),
-        points: Math.min(1000, Math.max(1, item.points || 20)),
-        difficulty: item.difficulty || input.difficulty,
-        hint: item.hint?.trim().slice(0, 400),
+        prompt: item.prompt,
+        options: item.cleanOptions,
+        points: item.safePoints,
+        difficulty: item.itemDiff,
+        ...(item.hint ? { hint: item.hint } : {}),
         zoneId: ZONE_ORDER[idx % ZONE_ORDER.length],
         isPublished: true,
         createdAt: nowIso,
@@ -791,10 +838,10 @@ class EduverseServerStore {
       const k: AnswerKey = {
         questionId: qId,
         bankId,
-        teacherId: input.teacherId,
-        correctIndex: safeIndex,
-        correctLetter: letters[safeIndex],
-        explanation: item.explanation?.trim().slice(0, 1000) || '',
+        teacherId: bank.teacherId,
+        correctIndex: item.safeIndex,
+        correctLetter: letters[item.safeIndex] || 'A',
+        explanation: item.explanation,
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -805,7 +852,7 @@ class EduverseServerStore {
     });
 
     this.logAudit(
-      input.teacherId,
+      bank.teacherId,
       'guru',
       'IMPORT_QUESTION_BANK',
       'questionBank',
