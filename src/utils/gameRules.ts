@@ -254,3 +254,74 @@ export function computeSessionAnalytics(progressList: StudentProgress[]) {
     averageAccuracy: Math.round(totalAcc / totalStudents),
   };
 }
+
+export type MusicIntensity = 'explore' | 'tense' | 'boss';
+
+export function calculateStreakMultiplier(streak: number): number {
+  const capped = Math.min(4, Math.max(0, Math.floor(streak)));
+  return Number((1 + capped * 0.25).toFixed(2));
+}
+
+export function calculateQuestSpeedBonus(
+  remainingSeconds: number,
+  isCorrect: boolean
+): { bonusXp: number; label: string } {
+  if (!isCorrect || remainingSeconds <= 0) {
+    return { bonusXp: 0, label: '' };
+  }
+  if (remainingSeconds >= 18) {
+    return { bonusXp: 25, label: 'Bonus Kilat' };
+  }
+  if (remainingSeconds >= 10) {
+    return { bonusXp: 15, label: 'Bonus Cepat' };
+  }
+  return { bonusXp: 8, label: 'Tepat Waktu' };
+}
+
+export function computeMusicIntensity(params: {
+  activeZone: WorldZoneId;
+  nearHazard: boolean;
+  secondsLeft: number;
+  inBossEncounter: boolean;
+  shieldHp: number;
+}): MusicIntensity {
+  if (
+    params.inBossEncounter ||
+    params.activeZone === 'arena' ||
+    params.secondsLeft <= 60 ||
+    params.shieldHp <= 1
+  ) {
+    return 'boss';
+  }
+  if (
+    params.nearHazard ||
+    params.activeZone === 'lab' ||
+    params.activeZone === 'perpustakaan' ||
+    params.activeZone === 'pulau' ||
+    params.secondsLeft <= 180
+  ) {
+    return 'tense';
+  }
+  return 'explore';
+}
+
+export function resolveHazardHit(params: {
+  hp: number;
+  invulnSeconds: number;
+  isDashing: boolean;
+}): { nextHp: number; damaged: boolean; defeated: boolean } {
+  if (params.isDashing || params.invulnSeconds > 0 || params.hp <= 0) {
+    return {
+      nextHp: Math.max(0, params.hp),
+      damaged: false,
+      defeated: params.hp <= 0,
+    };
+  }
+  const nextHp = Math.max(0, params.hp - 1);
+  return {
+    nextHp,
+    damaged: true,
+    defeated: nextHp === 0,
+  };
+}
+

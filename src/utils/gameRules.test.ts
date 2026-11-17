@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculateLevelFromXp,
+  calculateQuestSpeedBonus,
   calculateQuestionReward,
+  calculateStreakMultiplier,
+  computeMusicIntensity,
   evaluateUnlockedBadges,
   getUnlockedZonesForProgress,
+  resolveHazardHit,
   sortLeaderboard,
   validateSessionAccess,
 } from './gameRules.ts';
@@ -104,3 +108,57 @@ test('sortLeaderboard orders by score, then accuracy, then xp', () => {
   const sorted = sortLeaderboard(entries);
   assert.deepEqual(sorted.map((e) => e.studentName), ['Budi', 'Citra', 'Andi']);
 });
+
+test('calculateStreakMultiplier, speed bonus, music intensity, and hazard hit work accurately', () => {
+  assert.equal(calculateStreakMultiplier(0), 1);
+  assert.equal(calculateStreakMultiplier(2), 1.5);
+  assert.equal(calculateStreakMultiplier(8), 2);
+
+  assert.equal(calculateQuestSpeedBonus(20, true).bonusXp, 25);
+  assert.equal(calculateQuestSpeedBonus(12, true).bonusXp, 15);
+  assert.equal(calculateQuestSpeedBonus(4, true).bonusXp, 8);
+  assert.equal(calculateQuestSpeedBonus(20, false).bonusXp, 0);
+
+  assert.equal(
+    computeMusicIntensity({ activeZone: 'sekolah', nearHazard: false, secondsLeft: 900, inBossEncounter: false, shieldHp: 3 }),
+    'explore'
+  );
+  assert.equal(
+    computeMusicIntensity({ activeZone: 'lab', nearHazard: false, secondsLeft: 900, inBossEncounter: false, shieldHp: 3 }),
+    'tense'
+  );
+  assert.equal(
+    computeMusicIntensity({ activeZone: 'taman', nearHazard: true, secondsLeft: 900, inBossEncounter: false, shieldHp: 3 }),
+    'tense'
+  );
+  assert.equal(
+    computeMusicIntensity({ activeZone: 'arena', nearHazard: false, secondsLeft: 900, inBossEncounter: false, shieldHp: 3 }),
+    'boss'
+  );
+  assert.equal(
+    computeMusicIntensity({ activeZone: 'sekolah', nearHazard: false, secondsLeft: 45, inBossEncounter: false, shieldHp: 3 }),
+    'boss'
+  );
+
+  assert.deepEqual(resolveHazardHit({ hp: 3, invulnSeconds: 0.5, isDashing: false }), {
+    nextHp: 3,
+    damaged: false,
+    defeated: false,
+  });
+  assert.deepEqual(resolveHazardHit({ hp: 3, invulnSeconds: 0, isDashing: true }), {
+    nextHp: 3,
+    damaged: false,
+    defeated: false,
+  });
+  assert.deepEqual(resolveHazardHit({ hp: 2, invulnSeconds: 0, isDashing: false }), {
+    nextHp: 1,
+    damaged: true,
+    defeated: false,
+  });
+  assert.deepEqual(resolveHazardHit({ hp: 1, invulnSeconds: 0, isDashing: false }), {
+    nextHp: 0,
+    damaged: true,
+    defeated: true,
+  });
+});
+

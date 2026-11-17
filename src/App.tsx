@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { LandingPage } from './components/LandingPage.tsx';
 import { JoinSessionGate, type JoinedSessionPayload } from './components/JoinSessionGate.tsx';
 import { WorldPlayView } from './components/WorldPlayView.tsx';
 import { TeacherDashboard } from './components/TeacherDashboard.tsx';
 import { StudentDashboard } from './components/StudentDashboard.tsx';
+import { AudioProvider } from './contexts/AudioContext.tsx';
 import type { EduverseUser, StudentProgress } from './types/eduverse.ts';
 import {
   fetchExistingUserProfile,
@@ -253,15 +254,18 @@ export default function App() {
 
   if (bootingWorld) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
-        <Loader2 className="w-10 h-10 animate-spin text-sky-400" />
-        <p className="mt-4 text-sm font-semibold">Mempersiapkan Dunia 3D EDUVERSE...</p>
-      </div>
+      <AudioProvider>
+        <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
+          <Loader2 className="w-10 h-10 animate-spin text-sky-400" />
+          <p className="mt-4 text-sm font-semibold">Mempersiapkan Dunia 3D EDUVERSE...</p>
+        </div>
+      </AudioProvider>
     );
   }
 
+  let content: ReactNode;
   if (view === 'world' && activeWorldPayload) {
-    return (
+    content = (
       <WorldPlayView
         session={activeWorldPayload.session}
         questions={activeWorldPayload.questions}
@@ -273,10 +277,8 @@ export default function App() {
         onExitWorld={handleExitWorld}
       />
     );
-  }
-
-  if (view === 'join') {
-    return (
+  } else if (view === 'join') {
+    content = (
       <JoinSessionGate
         joinCode={joinCode}
         defaultStudentName={currentUser?.displayName || ''}
@@ -288,14 +290,12 @@ export default function App() {
         }}
       />
     );
-  }
-
-  if (view === 'teacher') {
+  } else if (view === 'teacher') {
     const teacherUser =
       currentUser && (currentUser.role === 'guru' || currentUser.role === 'super_admin')
         ? currentUser
         : DEMO_TEACHER_USER;
-    return (
+    content = (
       <TeacherDashboard
         user={teacherUser}
         darkMode={darkMode}
@@ -311,10 +311,8 @@ export default function App() {
         onLogout={() => void handleLogout()}
       />
     );
-  }
-
-  if (view === 'student' && currentUser) {
-    return (
+  } else if (view === 'student' && currentUser) {
+    content = (
       <StudentDashboard
         user={currentUser}
         darkMode={darkMode}
@@ -323,18 +321,20 @@ export default function App() {
         onLogout={() => void handleLogout()}
       />
     );
+  } else {
+    content = (
+      <LandingPage
+        darkMode={darkMode}
+        onToggleTheme={() => setDarkMode((d) => !d)}
+        onLoginRole={(role) => void handleLoginRole(role)}
+        onEnterDemoTeacher={handleEnterTeacherWorkspace}
+        onOpenJoinCode={navigateToJoinCode}
+        onStartDemoWorld={() => void launchDirectSessionWorld('EDU101')}
+        authLoading={authLoading}
+        authError={authError}
+      />
+    );
   }
 
-  return (
-    <LandingPage
-      darkMode={darkMode}
-      onToggleTheme={() => setDarkMode((d) => !d)}
-      onLoginRole={(role) => void handleLoginRole(role)}
-      onEnterDemoTeacher={handleEnterTeacherWorkspace}
-      onOpenJoinCode={navigateToJoinCode}
-      onStartDemoWorld={() => void launchDirectSessionWorld('EDU101')}
-      authLoading={authLoading}
-      authError={authError}
-    />
-  );
+  return <AudioProvider>{content}</AudioProvider>;
 }

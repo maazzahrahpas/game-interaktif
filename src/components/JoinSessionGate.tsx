@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, AlertTriangle, CheckCircle2, Clock, Gamepad2, Loader2, ShieldCheck } from 'lucide-react';
 import type { Classroom, GameSession, LeaderboardEntry, StudentProgress, StudentQuestion } from '../types/eduverse.ts';
+import { EduverseCrest } from './LandingPage.tsx';
 
 export interface JoinedSessionPayload {
   session: GameSession;
@@ -138,16 +139,22 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
-      <div className="max-w-xl w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-7 sm:p-8 shadow-sm">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Kembali ke Beranda
-        </button>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 bg-[radial-gradient(ellipse_at_top,_rgba(56,189,248,0.14),_transparent_60%)] text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
+      <div className="max-w-xl w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-7 sm:p-8 shadow-lg">
+        <div className="flex items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Kembali ke Beranda
+          </button>
+          <span className="inline-flex items-center gap-2 text-sm font-extrabold font-display text-blue-600 dark:text-sky-400">
+            <EduverseCrest className="w-5 h-5" />
+            EDUVERSE
+          </span>
+        </div>
 
         {loading && (
           <div className="py-12 flex flex-col items-center justify-center text-center">

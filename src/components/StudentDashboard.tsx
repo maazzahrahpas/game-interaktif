@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Compass, Gamepad2, Loader2, LogOut, Moon, Sun, Trophy } from 'lucide-react';
+import { Award, Compass, Gamepad2, Loader2, LogOut, Moon, Settings, Sun, Trophy } from 'lucide-react';
+import { AudioSettingsPanel } from './AudioSettingsPanel.tsx';
 import type {
   AchievementBadge,
   EduverseUser,
@@ -30,6 +31,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
   const [badges, setBadges] = useState<AchievementBadge[]>([]);
   const [codeInput, setCodeInput] = useState('');
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -68,6 +70,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             EDUVERSE · Portal Siswa
           </span>
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowAudioSettings(true)}
+              aria-label="Pengaturan Audio"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <Settings className="w-4 h-4 text-blue-600 dark:text-sky-400" />
+              Pengaturan Audio
+            </button>
             <button
               type="button"
               onClick={onToggleTheme}
@@ -243,6 +254,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
         )}
       </main>
+
+      {showAudioSettings && (
+        <div className="fixed inset-0 z-30 bg-slate-950/75 flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pengaturan Audio Dunia 3D"
+            className="max-w-lg w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-xl"
+          >
+            <AudioSettingsPanel onClose={() => setShowAudioSettings(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -425,5 +425,236 @@ export function buildChallengeArenaLandmark(): THREE.Group {
     flame.position.set(Math.cos(angle) * 9.5, 6.2, Math.sin(angle) * 9.5);
     group.add(p, flame);
   }
+
+  // Holographic Boss Crown Ring hovering above the arena
+  const crownRing = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.14, 8, 32), crimsonMat);
+  crownRing.rotation.x = Math.PI / 2;
+  crownRing.position.y = 7.4;
+  group.add(crownRing);
+
   return group;
 }
+
+/**
+ * Generates a vibrant atmospheric sky dome texture (deep azure zenith -> warm sunlit horizon).
+ */
+export function createSkyDomeTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  const grad = ctx.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0.0, '#0f172a');
+  grad.addColorStop(0.24, '#1d4ed8');
+  grad.addColorStop(0.48, '#38bdf8');
+  grad.addColorStop(0.66, '#bae6fd');
+  grad.addColorStop(0.8, '#fde68a');
+  grad.addColorStop(1.0, '#0284c7');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Soft horizon cloud streaks
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+  for (let i = 0; i < 14; i++) {
+    const x = (i * 83) % 512;
+    const y = 240 + ((i * 29) % 70);
+    const w = 90 + (i % 4) * 35;
+    ctx.beginPath();
+    ctx.ellipse(x, y, w, 12 + (i % 3) * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+export interface SentinelDroneRig {
+  root: THREE.Group;
+  body: THREE.Group;
+  scannerRing: THREE.Mesh;
+  warningDisc: THREE.Mesh;
+  warningMat: THREE.MeshBasicMaterial;
+  eyeMat: THREE.MeshStandardMaterial;
+}
+
+/**
+ * Builds a composite 6-part Sentinel Patroller Drone + Ground Telegraph Warning Ring.
+ */
+export function buildSentinelDrone(accentHex = 0xef4444): SentinelDroneRig {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  body.position.y = 1.65;
+  root.add(body);
+
+  const hullMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.35,
+    metalness: 0.65,
+  });
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0xf97316,
+    roughness: 0.3,
+    metalness: 0.45,
+  });
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: accentHex,
+    emissive: accentHex,
+    emissiveIntensity: 1.25,
+    roughness: 0.15,
+  });
+
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.62, 14, 12), hullMat);
+  core.castShadow = true;
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 10), eyeMat);
+  eye.position.set(0, 0.04, 0.52);
+
+  const scannerRing = new THREE.Mesh(new THREE.TorusGeometry(0.86, 0.08, 8, 24), eyeMat);
+  scannerRing.rotation.x = Math.PI / 2;
+
+  const podGeo = new THREE.CylinderGeometry(0.16, 0.22, 0.62, 10);
+  const leftPod = new THREE.Mesh(podGeo, trimMat);
+  leftPod.position.set(-0.78, -0.08, 0);
+  const rightPod = new THREE.Mesh(podGeo, trimMat);
+  rightPod.position.set(0.78, -0.08, 0);
+
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.48, 8), hullMat);
+  spire.position.set(0, 0.78, 0);
+
+  body.add(core, eye, scannerRing, leftPod, rightPod, spire);
+
+  // Ground telegraph ring (expands & intensifies before shockwave)
+  const warningMat = new THREE.MeshBasicMaterial({
+    color: accentHex,
+    transparent: true,
+    opacity: 0.22,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const warningDisc = new THREE.Mesh(new THREE.RingGeometry(1.6, 2.45, 28), warningMat);
+  warningDisc.rotation.x = -Math.PI / 2;
+  warningDisc.position.y = 0.06;
+  root.add(warningDisc);
+
+  return { root, body, scannerRing, warningDisc, warningMat, eyeMat };
+}
+
+/**
+ * Builds a composite 4-part Energy Jump Pad that launches the avatar onto sky platforms.
+ */
+export function buildJumpPad(colorHex = 0x10b981): { root: THREE.Group; ring: THREE.Mesh } {
+  const root = new THREE.Group();
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.6 });
+  const glowMat = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    emissive: colorHex,
+    emissiveIntensity: 1.1,
+    roughness: 0.2,
+  });
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.55, 0.28, 8), baseMat);
+  base.position.y = 0.14;
+  base.receiveShadow = true;
+
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.34, 16), glowMat);
+  core.position.y = 0.18;
+
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.08, 8, 24), glowMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.68;
+
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.32, 0.06, 6, 8), baseMat);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.28;
+
+  root.add(base, core, ring, rim);
+  return { root, ring };
+}
+
+/**
+ * Builds a composite 4-part Cyber-Academic Lamp Post.
+ */
+export function buildLampPost(lightColor = 0xfde047): THREE.Group {
+  const group = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45, metalness: 0.55 });
+  const lampMat = new THREE.MeshStandardMaterial({
+    color: lightColor,
+    emissive: lightColor,
+    emissiveIntensity: 1.2,
+    roughness: 0.15,
+  });
+
+  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.32, 0.4, 8), poleMat);
+  plinth.position.y = 0.2;
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 3.8, 8), poleMat);
+  pole.position.y = 2.2;
+  pole.castShadow = true;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.1, 0.12), poleMat);
+  arm.position.set(0.28, 4.0, 0);
+  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.26, 0), lampMat);
+  orb.position.set(0.55, 3.72, 0);
+
+  group.add(plinth, pole, arm, orb);
+  return group;
+}
+
+/**
+ * Builds an elevated Energy Parkour Platform (3 parts).
+ */
+export function buildFloatingPlatform(width: number, depth: number, accentHex = 0x38bdf8): THREE.Group {
+  const group = new THREE.Group();
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.55, metalness: 0.2 });
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: accentHex,
+    emissive: accentHex,
+    emissiveIntensity: 0.55,
+    roughness: 0.25,
+  });
+
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(width, 0.45, depth), deckMat);
+  deck.receiveShadow = true;
+  deck.castShadow = true;
+
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(width + 0.24, 0.16, depth + 0.24), trimMat);
+  rim.position.y = -0.14;
+
+  const underCore = new THREE.Mesh(new THREE.ConeGeometry(Math.min(width, depth) * 0.36, 0.9, 6), trimMat);
+  underCore.rotation.x = Math.PI;
+  underCore.position.y = -0.68;
+
+  group.add(deck, rim, underCore);
+  return group;
+}
+
+/**
+ * Builds a rotating Energy Laser Pylon (3 parts).
+ */
+export function buildLaserPylon(beamLength: number): { root: THREE.Group; rotator: THREE.Group } {
+  const root = new THREE.Group();
+  const pylonMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.6 });
+  const laserMat = new THREE.MeshStandardMaterial({
+    color: 0xf43f5e,
+    emissive: 0xe11d48,
+    emissiveIntensity: 1.5,
+    roughness: 0.1,
+  });
+
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 1.3, 8), pylonMat);
+  pedestal.position.y = 0.65;
+  pedestal.castShadow = true;
+
+  const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), laserMat);
+  cap.position.y = 1.55;
+
+  const rotator = new THREE.Group();
+  rotator.position.y = 0.85;
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, beamLength, 8), laserMat);
+  beam.rotation.z = Math.PI / 2;
+  beam.position.x = beamLength * 0.5;
+  rotator.add(beam);
+
+  root.add(pedestal, cap, rotator);
+  return { root, rotator };
+}
+
