@@ -23,6 +23,28 @@
       "isActive": true,
       "createdAt": "2026-11-17T01:54:28.505Z",
       "updatedAt": "2026-11-17T01:54:28.505Z"
+    },
+    "cls_1794963226182": {
+      "id": "cls_1794963226182",
+      "teacherId": "teacher_vercel_test",
+      "name": "XI IPA Vercel",
+      "grade": "11",
+      "subject": "Matematika",
+      "inviteCode": "MAT586",
+      "isActive": true,
+      "createdAt": "2026-11-18T00:53:46.182Z",
+      "updatedAt": "2026-11-18T00:53:46.182Z"
+    },
+    "cls_cold_snapshot": {
+      "id": "cls_cold_snapshot",
+      "teacherId": "teacher_vercel_test",
+      "name": "XI Snapshot",
+      "grade": "11",
+      "subject": "Matematika",
+      "inviteCode": "SNP11",
+      "isActive": true,
+      "createdAt": "2026-11-18T00:53:46.187Z",
+      "updatedAt": "2026-11-18T00:53:46.187Z"
     }
   },
   "questionBanks": {
@@ -109,6 +131,54 @@
       "questionCount": 1,
       "createdAt": "2026-11-17T03:26:45.638Z",
       "updatedAt": "2026-11-17T03:26:45.638Z"
+    },
+    "bank_1794963225240_y6jd": {
+      "id": "bank_1794963225240_y6jd",
+      "teacherId": "teacher_unit_test",
+      "title": "Uji Bank Soal Unit",
+      "subject": "Biologi",
+      "grade": "11",
+      "topic": "Uji Bank Soal Unit",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-18T00:53:45.240Z",
+      "updatedAt": "2026-11-18T00:53:45.240Z"
+    },
+    "bank_1794963226173_2ijf": {
+      "id": "bank_1794963226173_2ijf",
+      "teacherId": "teacher_vercel_test",
+      "title": "Bank Soal Uji Vercel",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-18T00:53:46.173Z",
+      "updatedAt": "2026-11-18T00:53:46.173Z"
+    },
+    "bank_cold_snapshot": {
+      "id": "bank_cold_snapshot",
+      "teacherId": "teacher_vercel_test",
+      "title": "Bank Snapshot",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-18T00:53:46.187Z",
+      "updatedAt": "2026-11-18T00:53:46.187Z"
+    },
+    "bank_1794963274542_tw9x": {
+      "id": "bank_1794963274542_tw9x",
+      "teacherId": "teacher_demo_1",
+      "title": "Uji Bank Soal Vercel",
+      "subject": "Biologi",
+      "grade": "11",
+      "topic": "Respirasi & Sel",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-18T00:54:34.542Z",
+      "updatedAt": "2026-11-18T00:54:34.542Z"
     }
   },
   "questions": {
@@ -451,6 +521,82 @@
       "isPublished": true,
       "createdAt": "2026-11-17T03:26:45.638Z",
       "updatedAt": "2026-11-17T03:26:45.638Z"
+    },
+    "bank_1794963225240_y6jd_q1": {
+      "id": "bank_1794963225240_y6jd_q1",
+      "bankId": "bank_1794963225240_y6jd",
+      "teacherId": "teacher_unit_test",
+      "orderIndex": 0,
+      "prompt": "Apa pusat energi sel?",
+      "options": [
+        "Ribosom",
+        "Mitokondria",
+        "Vakuola",
+        "Lisosom",
+        "Nukleus"
+      ],
+      "points": 25,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-18T00:53:45.240Z",
+      "updatedAt": "2026-11-18T00:53:45.240Z"
+    },
+    "bank_1794963226173_2ijf_q1": {
+      "id": "bank_1794963226173_2ijf_q1",
+      "bankId": "bank_1794963226173_2ijf",
+      "teacherId": "teacher_vercel_test",
+      "orderIndex": 0,
+      "prompt": "Berapakah hasil dari 3 x 4?",
+      "options": [
+        "7",
+        "12",
+        "15",
+        "9"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-18T00:53:46.173Z",
+      "updatedAt": "2026-11-18T00:53:46.173Z"
+    },
+    "q_cold_1": {
+      "id": "q_cold_1",
+      "bankId": "bank_cold_snapshot",
+      "teacherId": "teacher_vercel_test",
+      "orderIndex": 0,
+      "prompt": "Berapakah 5 + 5?",
+      "options": [
+        "8",
+        "10",
+        "12",
+        "14"
+      ],
+      "points": 25,
+      "difficulty": "Mudah",
+      "isPublished": true,
+      "createdAt": "2026-11-18T00:53:46.187Z",
+      "updatedAt": "2026-11-18T00:53:46.187Z"
+    },
+    "bank_1794963274542_tw9x_q1": {
+      "id": "bank_1794963274542_tw9x_q1",
+      "bankId": "bank_1794963274542_tw9x",
+      "teacherId": "teacher_demo_1",
+      "orderIndex": 0,
+      "prompt": "Organel penghasil energi ATP pada sel eukariotik adalah?",
+      "options": [
+        "Mitokondria",
+        "Ribosom",
+        "Lisosom",
+        "Badan Golgi"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-18T00:54:34.542Z",
+      "updatedAt": "2026-11-18T00:54:34.542Z"
     }
   },
   "answerKeys": {
@@ -623,6 +769,46 @@
       "explanation": "Mitokondria menghasilkan ATP.",
       "createdAt": "2026-11-17T03:26:45.638Z",
       "updatedAt": "2026-11-17T03:26:45.638Z"
+    },
+    "bank_1794963225240_y6jd_q1": {
+      "questionId": "bank_1794963225240_y6jd_q1",
+      "bankId": "bank_1794963225240_y6jd",
+      "teacherId": "teacher_unit_test",
+      "correctIndex": 4,
+      "correctLetter": "E",
+      "explanation": "Mitokondria menghasilkan ATP.",
+      "createdAt": "2026-11-18T00:53:45.240Z",
+      "updatedAt": "2026-11-18T00:53:45.240Z"
+    },
+    "bank_1794963226173_2ijf_q1": {
+      "questionId": "bank_1794963226173_2ijf_q1",
+      "bankId": "bank_1794963226173_2ijf",
+      "teacherId": "teacher_vercel_test",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "3 dikali 4 sama dengan 12.",
+      "createdAt": "2026-11-18T00:53:46.173Z",
+      "updatedAt": "2026-11-18T00:53:46.173Z"
+    },
+    "q_cold_1": {
+      "questionId": "q_cold_1",
+      "bankId": "bank_cold_snapshot",
+      "teacherId": "teacher_vercel_test",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "5 + 5 = 10",
+      "createdAt": "2026-11-18T00:53:46.187Z",
+      "updatedAt": "2026-11-18T00:53:46.187Z"
+    },
+    "bank_1794963274542_tw9x_q1": {
+      "questionId": "bank_1794963274542_tw9x_q1",
+      "bankId": "bank_1794963274542_tw9x",
+      "teacherId": "teacher_demo_1",
+      "correctIndex": 0,
+      "correctLetter": "A",
+      "explanation": "",
+      "createdAt": "2026-11-18T00:54:34.542Z",
+      "updatedAt": "2026-11-18T00:54:34.542Z"
     }
   },
   "gameSessions": {
@@ -675,6 +861,31 @@
       "endsAt": "2026-11-24T01:54:28.505Z",
       "createdAt": "2026-11-17T01:54:28.505Z",
       "updatedAt": "2026-11-17T01:54:28.505Z"
+    },
+    "sess_1794963226194": {
+      "id": "sess_1794963226194",
+      "teacherId": "teacher_vercel_test",
+      "classId": "cls_cold_snapshot",
+      "bankId": "bank_cold_snapshot",
+      "joinCode": "MAA6OL",
+      "title": "Sesi Snapshot Cold Lambda",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "gameMode": "Quiz Adventure",
+      "worldId": "world_eduverse_utama",
+      "durationMinutes": 30,
+      "maxAttempts": 2,
+      "questionCount": 1,
+      "totalPoints": 25,
+      "isLinkActive": true,
+      "status": "active",
+      "requireIdentity": true,
+      "startsAt": "2026-11-18T00:53:46.194Z",
+      "endsAt": "2026-11-20T00:53:46.194Z",
+      "createdAt": "2026-11-18T00:53:46.194Z",
+      "updatedAt": "2026-11-18T00:53:46.194Z"
     }
   },
   "studentProgress": {
@@ -719,6 +930,56 @@
   },
   "achievements": {},
   "auditLogs": [
+    {
+      "id": "log_1794963274542_qxi3j",
+      "actorId": "teacher_demo_1",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1794963274542_tw9x",
+      "summary": "Menyimpan bank soal \"Uji Bank Soal Vercel\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-18T00:54:34.542Z"
+    },
+    {
+      "id": "log_1794963226194_37zzq",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "CREATE_GAME_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_1794963226194",
+      "summary": "Membuat sesi Sesi Snapshot Cold Lambda dengan kode tautan MAA6OL",
+      "createdAt": "2026-11-18T00:53:46.194Z"
+    },
+    {
+      "id": "log_1794963226182_jehi4",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "CREATE_CLASS",
+      "targetType": "class",
+      "targetId": "cls_1794963226182",
+      "summary": "Membuat kelas XI IPA Vercel",
+      "createdAt": "2026-11-18T00:53:46.182Z"
+    },
+    {
+      "id": "log_1794963226174_m8tqz",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1794963226173_2ijf",
+      "summary": "Menyimpan bank soal \"Bank Soal Uji Vercel\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-18T00:53:46.174Z"
+    },
+    {
+      "id": "log_1794963225241_a8lds",
+      "actorId": "teacher_unit_test",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1794963225240_y6jd",
+      "summary": "Menyimpan bank soal \"Uji Bank Soal Unit\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-18T00:53:45.241Z"
+    },
     {
       "id": "log_1794886005639_qwhte",
       "actorId": "teacher_unit_test",

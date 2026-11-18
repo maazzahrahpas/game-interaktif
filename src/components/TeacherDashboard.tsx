@@ -42,6 +42,8 @@ import { extractDocxFile, generateWordTemplateBlob } from '../utils/docxParser.t
 import { computeSessionAnalytics } from '../utils/gameRules.ts';
 import { exportSessionResultsToExcel, exportSessionResultsToPDF } from '../utils/exportReports.ts';
 import {
+  auth,
+  fetchTeacherWorkspaceFromFirestore,
   syncBankToFirestore,
   syncClassToFirestore,
   syncSessionToFirestore,
@@ -75,6 +77,17 @@ async function readApiResponse<T>(res: Response): Promise<{ data: T | null; rawT
   } catch {
     return { data: null, rawText };
   }
+}
+
+function mergeByKey<T>(primary: T[], secondary: T[], getKey: (item: T) => string): T[] {
+  const map = new Map<string, T>();
+  for (const item of secondary) {
+    map.set(getKey(item), item);
+  }
+  for (const item of primary) {
+    map.set(getKey(item), item);
+  }
+  return Array.from(map.values());
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
@@ -162,25 +175,56 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         setErrorMsg(data?.error || `Gagal memuat data dashboard guru (HTTP ${res.status}).`);
         return;
       }
-      setClasses(data.classes || []);
-      setBanks(data.questionBanks || []);
-      setQuestions(data.questions || []);
-      setAnswerKeys(data.answerKeys || []);
-      setSessions(data.gameSessions || []);
+      const firestoreWorkspace =
+        auth.currentUser && auth.currentUser.uid === user.uid
+          ? await fetchTeacherWorkspaceFromFirestore(auth.currentUser.uid).catch(() => null)
+          : null;
+
+      const mergedClasses = mergeByKey(
+        firestoreWorkspace?.classes || [],
+        data.classes || [],
+        (c) => c.id
+      );
+      const mergedBanks = mergeByKey(
+        firestoreWorkspace?.questionBanks || [],
+        data.questionBanks || [],
+        (b) => b.id
+      );
+      const mergedQuestions = mergeByKey(
+        firestoreWorkspace?.questions || [],
+        data.questions || [],
+        (q) => q.id
+      );
+      const mergedAnswerKeys = mergeByKey(
+        firestoreWorkspace?.answerKeys || [],
+        data.answerKeys || [],
+        (k) => k.questionId
+      );
+      const mergedSessions = mergeByKey(
+        firestoreWorkspace?.gameSessions || [],
+        data.gameSessions || [],
+        (s) => s.id
+      );
+
+      setClasses(mergedClasses);
+      setBanks(mergedBanks);
+      setQuestions(mergedQuestions);
+      setAnswerKeys(mergedAnswerKeys);
+      setSessions(mergedSessions);
       setProgressList(data.studentProgress || []);
       setSubmissions(data.submissions || []);
       setAuditLogs(data.auditLogs || []);
 
-      if (data.classes?.length) {
-        const firstClassId = data.classes[0].id;
+      if (mergedClasses.length) {
+        const firstClassId = mergedClasses[0].id;
         setSessClassId((prev) => prev || firstClassId);
       }
-      if (data.questionBanks?.length) {
-        const firstBankId = data.questionBanks[0].id;
+      if (mergedBanks.length) {
+        const firstBankId = mergedBanks[0].id;
         setSessBankId((prev) => prev || firstBankId);
       }
-      if (data.gameSessions?.length) {
-        const firstSessId = data.gameSessions[0].id;
+      if (mergedSessions.length) {
+        const firstSessId = mergedSessions[0].id;
         setMonitorSessionId((prev) => prev || firstSessId);
       }
     } catch {
@@ -227,6 +271,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       } catch {
         // Ignore invalid frames
       }
+    };
+    ws.onerror = () => {
+      // Ignore WebSocket connection failures on serverless hosts without persistent WS
     };
     return () => ws.close();
   }, [monitorSessionId, user.uid, user.displayName]);
@@ -283,6 +330,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setCreatingSession(true);
     setErrorMsg(null);
     try {
+      const selectedClass = classes.find((c) => c.id === sessClassId);
+      const selectedBank = banks.find((b) => b.id === sessBankId);
+      const selectedQuestions = questions.filter((q) => q.bankId === sessBankId);
+      const selectedAnswerKeys = answerKeys.filter((k) => k.bankId === sessBankId);
+
       const res = await fetch('/api/teacher/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -298,6 +350,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           requireIdentity: sessRequireId,
           startsAt: new Date(sessStartsAt).toISOString(),
           endsAt: new Date(sessEndsAt).toISOString(),
+          ...(selectedClass ? { classroomSnapshot: selectedClass } : {}),
+          ...(selectedBank ? { bankSnapshot: selectedBank } : {}),
+          ...(selectedQuestions.length ? { questionsSnapshot: selectedQuestions } : {}),
+          ...(selectedAnswerKeys.length ? { answerKeysSnapshot: selectedAnswerKeys } : {}),
         }),
       });
       const { data } = await readApiResponse<{ ok: boolean; error?: string; session?: GameSession }>(res);
@@ -326,6 +382,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       });
       const { data } = await readApiResponse<{ ok: boolean; error?: string; session?: GameSession }>(res);
       if (res.ok && data?.ok && data.session) {
+        await syncSessionToFirestore(data.session).catch(() => undefined);
         setSessions((prev) => prev.map((item) => (item.id === s.id ? data.session! : item)));
         showNotice(`Tautan ${s.joinCode} ${data.session.isLinkActive ? 'diaktifkan' : 'dinonaktifkan'}.`);
       } else {
@@ -345,6 +402,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       });
       const { data } = await readApiResponse<{ ok: boolean; error?: string; session?: GameSession }>(res);
       if (res.ok && data?.ok && data.session) {
+        await syncSessionToFirestore(data.session).catch(() => undefined);
         setSessions((prev) => prev.map((item) => (item.id === s.id ? data.session! : item)));
         showNotice(`Sesi ${s.joinCode} telah diakhiri.`);
       } else {

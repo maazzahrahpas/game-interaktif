@@ -327,6 +327,20 @@ export async function syncSessionToFirestore(session: GameSession): Promise<void
   }
 }
 
+function toIsoString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toDate' in value &&
+    typeof (value as { toDate: () => Date }).toDate === 'function'
+  ) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  return new Date().toISOString();
+}
+
 export async function fetchUserClassesFromFirestore(uid: string): Promise<Classroom[]> {
   const path = 'classes';
   try {
@@ -343,11 +357,125 @@ export async function fetchUserClassesFromFirestore(uid: string): Promise<Classr
         description: v.description ? String(v.description) : undefined,
         inviteCode: String(v.inviteCode),
         isActive: Boolean(v.isActive),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: toIsoString(v.createdAt),
+        updatedAt: toIsoString(v.updatedAt),
       };
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
+}
+
+export async function fetchTeacherWorkspaceFromFirestore(uid: string): Promise<{
+  classes: Classroom[];
+  questionBanks: QuestionBank[];
+  questions: StudentQuestion[];
+  answerKeys: AnswerKey[];
+  gameSessions: GameSession[];
+}> {
+  const classes = await fetchUserClassesFromFirestore(uid);
+
+  let questionBanks: QuestionBank[] = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'questionBanks'), where('teacherId', '==', uid)));
+    questionBanks = snap.docs.map((d) => {
+      const v = d.data();
+      return {
+        id: d.id,
+        teacherId: String(v.teacherId),
+        title: String(v.title),
+        subject: String(v.subject),
+        grade: v.grade,
+        topic: String(v.topic || v.title),
+        difficulty: v.difficulty || 'Sedang',
+        questionCount: Number(v.questionCount || 0),
+        createdAt: toIsoString(v.createdAt),
+        updatedAt: toIsoString(v.updatedAt),
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'questionBanks');
+  }
+
+  let questions: StudentQuestion[] = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'questions'), where('teacherId', '==', uid)));
+    questions = snap.docs.map((d) => {
+      const v = d.data();
+      return {
+        id: d.id,
+        bankId: String(v.bankId),
+        teacherId: String(v.teacherId),
+        orderIndex: Number(v.orderIndex || 0),
+        prompt: String(v.prompt),
+        options: Array.isArray(v.options) ? v.options.map((o: unknown) => String(o)) : [],
+        points: Number(v.points || 20),
+        difficulty: v.difficulty || 'Sedang',
+        hint: v.hint ? String(v.hint) : undefined,
+        zoneId: v.zoneId,
+        isPublished: Boolean(v.isPublished),
+        createdAt: toIsoString(v.createdAt),
+        updatedAt: toIsoString(v.updatedAt),
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'questions');
+  }
+
+  let answerKeys: AnswerKey[] = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'answerKeys'), where('teacherId', '==', uid)));
+    answerKeys = snap.docs.map((d) => {
+      const v = d.data();
+      return {
+        questionId: String(v.questionId || d.id),
+        bankId: String(v.bankId),
+        teacherId: String(v.teacherId),
+        correctIndex: Number(v.correctIndex || 0),
+        correctLetter: (v.correctLetter || 'A') as AnswerKey['correctLetter'],
+        explanation: v.explanation ? String(v.explanation) : '',
+        createdAt: toIsoString(v.createdAt),
+        updatedAt: toIsoString(v.updatedAt),
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'answerKeys');
+  }
+
+  let gameSessions: GameSession[] = [];
+  try {
+    const snap = await getDocs(query(collection(db, 'gameSessions'), where('teacherId', '==', uid)));
+    gameSessions = snap.docs.map((d) => {
+      const v = d.data();
+      return {
+        id: d.id,
+        teacherId: String(v.teacherId),
+        classId: String(v.classId),
+        bankId: String(v.bankId),
+        joinCode: String(v.joinCode),
+        title: String(v.title),
+        subject: String(v.subject),
+        grade: v.grade,
+        topic: String(v.topic || ''),
+        difficulty: v.difficulty || 'Sedang',
+        gameMode: v.gameMode || 'Quiz Adventure',
+        worldId: String(v.worldId || 'world_eduverse_utama'),
+        durationMinutes: Number(v.durationMinutes || 30),
+        maxAttempts: Number(v.maxAttempts || 3),
+        questionCount: Number(v.questionCount || 0),
+        totalPoints: Number(v.totalPoints || 0),
+        isLinkActive: Boolean(v.isLinkActive),
+        status: v.status || 'active',
+        requireIdentity: Boolean(v.requireIdentity),
+        startsAt: toIsoString(v.startsAt),
+        endsAt: toIsoString(v.endsAt),
+        createdAt: toIsoString(v.createdAt),
+        updatedAt: toIsoString(v.updatedAt),
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'gameSessions');
+  }
+
+  return { classes, questionBanks, questions, answerKeys, gameSessions };
 }

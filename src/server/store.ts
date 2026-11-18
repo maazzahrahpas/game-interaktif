@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   AchievementBadge,
@@ -24,7 +25,19 @@ import {
   validateSessionAccess,
 } from '../utils/gameRules.ts';
 
-const DATA_FILE = path.resolve(process.cwd(), '.eduverse-server-data.json');
+function resolveDataFilePath(): string {
+  const isServerless =
+    process.env.VERCEL === '1' ||
+    Boolean(process.env.VERCEL_ENV) ||
+    Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+  if (isServerless) {
+    return path.join(os.tmpdir(), '.eduverse-server-data.json');
+  }
+  return path.resolve(process.cwd(), '.eduverse-server-data.json');
+}
+
+const DATA_FILE = resolveDataFilePath();
+const TMP_FALLBACK_FILE = path.join(os.tmpdir(), '.eduverse-server-data.json');
 const ZONE_ORDER: WorldZoneId[] = ['sekolah', 'taman', 'lab', 'perpustakaan', 'pulau', 'arena'];
 
 export interface ServerDatabase {
@@ -355,16 +368,19 @@ class EduverseServerStore {
   }
 
   private load(): ServerDatabase {
-    try {
-      if (fs.existsSync(DATA_FILE)) {
-        const raw = fs.readFileSync(DATA_FILE, 'utf8');
-        const parsed = JSON.parse(raw) as ServerDatabase;
-        if (parsed && parsed.gameSessions && parsed.answerKeys) {
-          return parsed;
+    const candidates = DATA_FILE === TMP_FALLBACK_FILE ? [DATA_FILE] : [DATA_FILE, TMP_FALLBACK_FILE];
+    for (const filePath of candidates) {
+      try {
+        if (fs.existsSync(filePath)) {
+          const raw = fs.readFileSync(filePath, 'utf8');
+          const parsed = JSON.parse(raw) as ServerDatabase;
+          if (parsed && parsed.gameSessions && parsed.answerKeys) {
+            return parsed;
+          }
         }
+      } catch (err) {
+        console.error('Failed to read server data file, checking fallback:', err);
       }
-    } catch (err) {
-      console.error('Failed to read server data file, re-seeding:', err);
     }
     const seeded = createSeedDatabase();
     this.persist(seeded);
@@ -372,10 +388,17 @@ class EduverseServerStore {
   }
 
   private persist(target: ServerDatabase = this.db) {
+    const payload = JSON.stringify(target, null, 2);
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(target, null, 2), 'utf8');
-    } catch (err) {
-      console.error('Failed to write server data file:', err);
+      fs.writeFileSync(DATA_FILE, payload, 'utf8');
+    } catch {
+      if (DATA_FILE !== TMP_FALLBACK_FILE) {
+        try {
+          fs.writeFileSync(TMP_FALLBACK_FILE, payload, 'utf8');
+        } catch {
+          // Serverless environment may disable disk persistence; keep in-memory state active
+        }
+      }
     }
   }
 
@@ -875,7 +898,28 @@ class EduverseServerStore {
     requireIdentity: boolean;
     startsAt?: string;
     endsAt?: string;
+    classroomSnapshot?: Classroom;
+    bankSnapshot?: QuestionBank;
+    questionsSnapshot?: StudentQuestion[];
+    answerKeysSnapshot?: AnswerKey[];
   }) {
+    if (!this.db.classes[input.classId] && input.classroomSnapshot?.id === input.classId) {
+      this.db.classes[input.classId] = input.classroomSnapshot;
+    }
+    if (!this.db.questionBanks[input.bankId] && input.bankSnapshot?.id === input.bankId) {
+      this.db.questionBanks[input.bankId] = input.bankSnapshot;
+      for (const q of input.questionsSnapshot || []) {
+        if (q.bankId === input.bankId) {
+          this.db.questions[q.id] = q;
+        }
+      }
+      for (const k of input.answerKeysSnapshot || []) {
+        if (k.bankId === input.bankId) {
+          this.db.answerKeys[k.questionId] = k;
+        }
+      }
+    }
+
     const classroom = this.db.classes[input.classId];
     const bank = this.db.questionBanks[input.bankId];
     if (!classroom || !bank) {
