@@ -25,6 +25,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 import type {
   AnimState,
   AnswerKey,
+  CharacterSkinId,
   Classroom,
   EduverseUser,
   GameSession,
@@ -35,6 +36,22 @@ import type {
   WorldZoneId,
 } from '../types/eduverse.ts';
 import { arenaIdToWorldId, resolveArenaIdFromSession } from '../game/gameCatalog.ts';
+
+const ALLOWED_PLAYER_SKINS: readonly CharacterSkinId[] = [
+  'explorer',
+  'cyber_knight',
+  'bio_scientist',
+  'arcane_scholar',
+  'astro_pilot',
+  'ninja_logic',
+];
+
+function sanitizeSkinId(raw: unknown): CharacterSkinId | undefined {
+  if (typeof raw !== 'string') return undefined;
+  return (ALLOWED_PLAYER_SKINS as readonly string[]).includes(raw)
+    ? (raw as CharacterSkinId)
+    : undefined;
+}
 
 const app = initializeApp(firebaseConfig);
 const firestoreDatabaseId =
@@ -545,6 +562,7 @@ export async function syncPlayerStateToFirestore(state: {
   studentId: string;
   displayName: string;
   avatarColor: string;
+  skinId?: CharacterSkinId;
   x: number;
   y: number;
   z: number;
@@ -573,6 +591,7 @@ export async function syncPlayerStateToFirestore(state: {
     ((((Number(state.rotY) || 0) + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
   const clamp = (val: number, min: number, max: number) =>
     Math.min(max, Math.max(min, Number.isFinite(val) ? Number(val.toFixed(2)) : 0));
+  const validSkin = sanitizeSkinId(state.skinId);
 
   try {
     await setDoc(docRef, {
@@ -581,6 +600,7 @@ export async function syncPlayerStateToFirestore(state: {
       studentId: state.studentId,
       displayName: (state.displayName.trim() || 'Penjelajah').slice(0, 80),
       avatarColor: (state.avatarColor || '#2563EB').slice(0, 20),
+      ...(validSkin ? { skinId: validSkin } : {}),
       x: clamp(state.x, -500, 500),
       y: clamp(state.y, -50, 200),
       z: clamp(state.z, -500, 500),
@@ -591,7 +611,7 @@ export async function syncPlayerStateToFirestore(state: {
       updatedAt: serverTimestamp(),
     });
   } catch {
-    // Ignore silently if Firestore gameSessions doc does not exist (e.g. demo EDU101 session)
+    // Ignore silently if Firestore permissions or session doc reject write
   }
 }
 
@@ -619,12 +639,14 @@ export function subscribeSessionPlayerStates(
         if (Number.isFinite(updatedMs) && nowMs - updatedMs > 60000) {
           return;
         }
+        const validSkin = sanitizeSkinId(v.skinId);
         players.push({
           id: String(v.id || d.id),
           sessionId: String(v.sessionId || sessionId),
           studentId: String(v.studentId || ''),
           displayName: String(v.displayName || 'Penjelajah'),
           avatarColor: String(v.avatarColor || '#3B82F6'),
+          ...(validSkin ? { skinId: validSkin } : {}),
           x: Number(v.x || 0),
           y: Number(v.y || 0),
           z: Number(v.z || 14),
@@ -641,5 +663,83 @@ export function subscribeSessionPlayerStates(
       // Ignore silent listener errors when offline or unauthenticated
     }
   );
+}
+
+export async function fetchActiveSessionByCodeFromFirestore(joinCode: string): Promise<{
+  session: GameSession;
+  questions: StudentQuestion[];
+} | null> {
+  if (!auth.currentUser) return null;
+  const cleanCode = joinCode.trim().toUpperCase();
+  if (!cleanCode) return null;
+  try {
+    const sessSnap = await getDocs(
+      query(
+        collection(db, 'gameSessions'),
+        where('joinCode', '==', cleanCode),
+        where('status', '==', 'active'),
+        where('isLinkActive', '==', true)
+      )
+    );
+    const first = sessSnap.docs[0];
+    if (!first) return null;
+    const v = first.data();
+    const session: GameSession = {
+      id: first.id,
+      teacherId: String(v.teacherId),
+      classId: String(v.classId),
+      bankId: String(v.bankId),
+      joinCode: String(v.joinCode),
+      title: String(v.title),
+      subject: String(v.subject),
+      grade: v.grade,
+      topic: String(v.topic || ''),
+      difficulty: v.difficulty || 'Sedang',
+      gameMode: v.gameMode || 'Quiz Adventure',
+      worldId: String(v.worldId || 'world_eduverse_utama'),
+      arenaId: resolveArenaIdFromSession({ worldId: String(v.worldId || 'world_eduverse_utama') }),
+      durationMinutes: Number(v.durationMinutes || 30),
+      maxAttempts: Number(v.maxAttempts || 3),
+      questionCount: Number(v.questionCount || 0),
+      totalPoints: Number(v.totalPoints || 0),
+      isLinkActive: Boolean(v.isLinkActive),
+      status: v.status || 'active',
+      requireIdentity: Boolean(v.requireIdentity),
+      startsAt: toIsoString(v.startsAt),
+      endsAt: toIsoString(v.endsAt),
+      createdAt: toIsoString(v.createdAt),
+      updatedAt: toIsoString(v.updatedAt),
+    };
+    const qSnap = await getDocs(
+      query(
+        collection(db, 'questions'),
+        where('bankId', '==', session.bankId),
+        where('isPublished', '==', true)
+      )
+    );
+    const questions: StudentQuestion[] = qSnap.docs
+      .map((d) => {
+        const qd = d.data();
+        return {
+          id: d.id,
+          bankId: String(qd.bankId),
+          teacherId: String(qd.teacherId),
+          orderIndex: Number(qd.orderIndex || 0),
+          prompt: String(qd.prompt),
+          options: Array.isArray(qd.options) ? qd.options.map((o: unknown) => String(o)) : [],
+          points: Number(qd.points || 20),
+          difficulty: qd.difficulty || 'Sedang',
+          hint: qd.hint ? String(qd.hint) : undefined,
+          zoneId: qd.zoneId,
+          isPublished: Boolean(qd.isPublished),
+          createdAt: toIsoString(qd.createdAt),
+          updatedAt: toIsoString(qd.updatedAt),
+        };
+      })
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+    return { session, questions };
+  } catch {
+    return null;
+  }
 }
 

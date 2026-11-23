@@ -271,83 +271,83 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
     return Array.from(merged.values());
   };
 
+  const resolveRoomKey = (codeParam: string, fallbackSessionId?: unknown): string => {
+    const known = serverStore.getSessionByCode(codeParam);
+    if (known) return known.id;
+    const sid = typeof fallbackSessionId === 'string' ? fallbackSessionId.trim() : '';
+    if (sid) return sid.slice(0, 128);
+    return codeParam.trim().toUpperCase();
+  };
+
   app.get('/api/sessions/:code/players', (req, res) => {
-    const session = serverStore.getSessionByCode(req.params.code);
-    if (!session) {
-      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
-    }
+    const roomId = resolveRoomKey(req.params.code, req.query.sessionId);
     return res.json({
       ok: true,
-      sessionId: session.id,
-      players: mergeRoomPlayers(session.id),
+      sessionId: roomId,
+      players: mergeRoomPlayers(roomId),
     });
   });
 
   app.post('/api/sessions/:code/players', (req, res) => {
-    const session = serverStore.getSessionByCode(req.params.code);
-    if (!session) {
-      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
-    }
-    const { studentId, displayName, avatarColor, skinId, x, y, z, rotY, animState, currentZone } = req.body || {};
+    const { sessionId: bodySessionId, studentId, displayName, avatarColor, skinId, x, y, z, rotY, animState, currentZone } = req.body || {};
     if (!studentId || !String(studentId).trim()) {
       return res.status(400).json({ ok: false, error: 'studentId wajib diisi.' });
     }
-    const result = serverStore.upsertRoomPlayer(session.id, {
-      studentId: String(studentId),
-      displayName: String(displayName || 'Penjelajah'),
-      avatarColor: avatarColor ? String(avatarColor) : undefined,
-      skinId,
-      x,
-      y,
-      z,
-      rotY,
-      animState,
-      currentZone,
-    });
-    broadcastToRoom(session.id, {
+    const roomId = resolveRoomKey(req.params.code, bodySessionId);
+    const result = serverStore.upsertRoomPlayer(
+      req.params.code,
+      {
+        studentId: String(studentId),
+        displayName: String(displayName || 'Penjelajah'),
+        avatarColor: avatarColor ? String(avatarColor) : undefined,
+        skinId,
+        x,
+        y,
+        z,
+        rotY,
+        animState,
+        currentZone,
+      },
+      roomId
+    );
+    broadcastToRoom(result.sessionId, {
       type: 'player_moved',
       player: result.player,
     });
     return res.json({
       ok: true,
-      sessionId: session.id,
+      sessionId: result.sessionId,
       player: result.player,
-      players: mergeRoomPlayers(session.id),
+      players: mergeRoomPlayers(result.sessionId),
     });
   });
 
   app.delete('/api/sessions/:code/players/:studentId', (req, res) => {
-    const session = serverStore.getSessionByCode(req.params.code);
-    if (!session) {
-      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
-    }
+    const roomId = resolveRoomKey(req.params.code, req.query.sessionId ?? req.body?.sessionId);
     const studentId = String(req.params.studentId || '').trim();
-    serverStore.removeRoomPlayer(session.id, studentId);
-    broadcastToRoom(session.id, {
+    serverStore.removeRoomPlayer(req.params.code, studentId, roomId);
+    broadcastToRoom(roomId, {
       type: 'player_left',
       studentId,
     });
     return res.json({
       ok: true,
-      sessionId: session.id,
-      players: mergeRoomPlayers(session.id),
+      sessionId: roomId,
+      players: mergeRoomPlayers(roomId),
     });
   });
 
   app.post('/api/sessions/:code/players/leave', (req, res) => {
-    const session = serverStore.getSessionByCode(req.params.code);
-    if (!session) {
-      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
-    }
+    const roomId = resolveRoomKey(req.params.code, req.body?.sessionId ?? req.query.sessionId);
     const studentId = String(req.body?.studentId || '').trim();
     if (studentId) {
-      serverStore.removeRoomPlayer(session.id, studentId);
-      broadcastToRoom(session.id, {
+      serverStore.removeRoomPlayer(req.params.code, studentId, roomId);
+      broadcastToRoom(roomId, {
         type: 'player_left',
         studentId,
       });
     }
-    return res.json({ ok: true });
+    return res.json({ ok: true, sessionId: roomId });
   });
 
   app.get('/api/student/:studentId/summary', (req, res) => {

@@ -15,6 +15,7 @@ import type {
   StudentProgress,
 } from './types/eduverse.ts';
 import {
+  auth,
   fetchExistingUserProfile,
   signInWithGoogleRole,
   signOutFirebase,
@@ -168,8 +169,12 @@ export default function App() {
 
         const guestIdentity = getOrCreateGuestExplorerIdentity();
         const activeSiswa = currentUser?.role === 'siswa' ? currentUser : null;
-        const studentId = identity?.studentId || activeSiswa?.uid || guestIdentity.studentId;
-        const studentName = identity?.studentName || activeSiswa?.displayName || guestIdentity.studentName;
+        const verifiedAuthUid =
+          auth.currentUser?.emailVerified && auth.currentUser.uid === currentUser?.uid
+            ? currentUser.uid
+            : null;
+        const studentId = identity?.studentId || activeSiswa?.uid || verifiedAuthUid || guestIdentity.studentId;
+        const studentName = identity?.studentName || activeSiswa?.displayName || currentUser?.displayName || guestIdentity.studentName;
         const studentIdentity = identity?.studentIdentity || activeSiswa?.identityNumber || 'XI IPA 1';
         const avatarColor = identity?.avatarColor || activeSiswa?.avatarColor || selectedAvatarColor || '#2563EB';
         const skinId = identity?.skinId || activeSiswa?.skinId || selectedSkinId;

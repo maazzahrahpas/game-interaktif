@@ -35,3 +35,14 @@ test('firestore.rules contains no get() or exists() inside allow list blocks', (
     assert.doesNotMatch(rule, /\b(get|exists)\(/, `List rule must not invoke get/exists: ${rule}`);
   }
 });
+
+test('firestore.rules allows playerStates on built-in sessions and validates skinId enum', () => {
+  const playerStatesBlock = rulesText.match(/match \/playerStates\/\{stateId\}[\s\S]*?match \/auditLogs/);
+  assert.ok(playerStatesBlock, 'playerStates block must exist');
+  assert.match(playerStatesBlock[0], /sess_edu101/);
+  assert.match(playerStatesBlock[0], /sess_fis202/);
+  assert.match(playerStatesBlock[0], /'skinId'/);
+  assert.match(rulesText, /'cyber_knight'/);
+  assert.match(playerStatesBlock[0], /incoming\(\)\.studentId == request\.auth\.uid/);
+});
+

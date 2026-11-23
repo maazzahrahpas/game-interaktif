@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import {
   auth,
+  signInWithGoogleRole,
   subscribeSessionPlayerStates,
   syncPlayerStateToFirestore,
 } from '../lib/firebase.ts';
@@ -119,6 +120,9 @@ const ShieldSocketSvg: React.FC<{ active: boolean }> = ({ active }) => (
   </svg>
 );
 
+// Remember if the current deployment host (e.g. Vercel serverless) does not support /ws upgrades
+let wsUnsupportedOnHost = false;
+
 export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   session,
   questions,
@@ -172,10 +176,19 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
 
   const [wsConnected, setWsConnected] = useState(false);
   const [httpSyncReady, setHttpSyncReady] = useState(false);
+  const [broadcastSyncReady, setBroadcastSyncReady] = useState(false);
+  const [cloudSyncBusy, setCloudSyncBusy] = useState(false);
+  const [activeStudentId, setActiveStudentId] = useState(studentId);
+  const [activeStudentName, setActiveStudentName] = useState(studentName);
   const [soloMode, setSoloMode] = useState(initialSoloMode);
   const [onlinePlayers, setOnlinePlayers] = useState<PlayerAvatarState[]>([]);
 
-  // Cross-transport player state caches (WebSocket + HTTP Room Sync + optional Firestore)
+  useEffect(() => {
+    setActiveStudentId(studentId);
+    setActiveStudentName(studentName);
+  }, [studentId, studentName]);
+
+  // Cross-transport player state caches (WebSocket + BroadcastChannel + HTTP Room Sync + Firestore)
   const latestLocalStateRef = useRef<{
     x: number;
     y: number;
@@ -192,15 +205,22 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     currentZone: initialProgress.currentZone || 'sekolah',
   });
   const wsPlayersRef = useRef<Map<string, PlayerAvatarState>>(new Map());
+  const bcPlayersRef = useRef<Map<string, PlayerAvatarState & { seenAtMs: number }>>(new Map());
   const httpPlayersRef = useRef<Map<string, PlayerAvatarState>>(new Map());
   const fsPlayersRef = useRef<Map<string, PlayerAvatarState>>(new Map());
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const lastHttpPostMsRef = useRef(0);
   const lastFsPostMsRef = useRef(0);
+  const lastBcPostMsRef = useRef(0);
   const dirtyMoveRef = useRef(false);
   const currentSkinIdRef = useRef(currentSkinId);
   currentSkinIdRef.current = currentSkinId;
   const currentAvatarColorRef = useRef(currentAvatarColor);
   currentAvatarColorRef.current = currentAvatarColor;
+  const activeStudentIdRef = useRef(activeStudentId);
+  activeStudentIdRef.current = activeStudentId;
+  const activeStudentNameRef = useRef(activeStudentName);
+  activeStudentNameRef.current = activeStudentName;
 
   // Cross-Device Ergonomics (Phone / Tablet / Desktop)
   const touchOverriddenRef = useRef(false);
@@ -323,12 +343,35 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   const audioActionsRef = useRef({ startMusic, stopMusic, playSfx });
   audioActionsRef.current = { startMusic, stopMusic, playSfx };
 
+  const buildLocalPlayerSnapshot = useCallback((): PlayerAvatarState => {
+    const sid = activeStudentIdRef.current;
+    return {
+      id: `ps_${session.id}_${sid}`,
+      sessionId: session.id,
+      studentId: sid,
+      displayName: activeStudentNameRef.current,
+      avatarColor: currentAvatarColorRef.current,
+      skinId: currentSkinIdRef.current,
+      ...latestLocalStateRef.current,
+      isOnline: true,
+      updatedAt: new Date().toISOString(),
+    };
+  }, [session.id]);
+
   const rebuildAndSyncPlayers = useCallback(() => {
+    const sid = activeStudentIdRef.current;
     if (soloModeRef.current) {
       setOnlinePlayers([]);
-      engineRef.current?.syncRemotePlayers([], studentId);
+      engineRef.current?.syncRemotePlayers([], sid);
       return;
     }
+    const nowMs = Date.now();
+    for (const [id, entry] of bcPlayersRef.current.entries()) {
+      if (nowMs - entry.seenAtMs > 15000) {
+        bcPlayersRef.current.delete(id);
+      }
+    }
+
     const merged = new Map<string, PlayerAvatarState>();
     for (const p of fsPlayersRef.current.values()) {
       merged.set(p.studentId, p);
@@ -337,14 +380,37 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       const prev = merged.get(p.studentId);
       merged.set(p.studentId, { ...prev, ...p, skinId: p.skinId || prev?.skinId });
     }
+    for (const { seenAtMs: _seen, ...p } of bcPlayersRef.current.values()) {
+      const prev = merged.get(p.studentId);
+      merged.set(p.studentId, { ...prev, ...p, skinId: p.skinId || prev?.skinId });
+    }
     for (const p of wsPlayersRef.current.values()) {
       const prev = merged.get(p.studentId);
       merged.set(p.studentId, { ...prev, ...p, skinId: p.skinId || prev?.skinId });
     }
+    // Ensure local player is always included in Multiplayer roster
+    if (!merged.has(sid)) {
+      merged.set(sid, buildLocalPlayerSnapshot());
+    }
     const list = Array.from(merged.values());
     setOnlinePlayers(list);
-    engineRef.current?.syncRemotePlayers(list, studentId);
-  }, [studentId]);
+    engineRef.current?.syncRemotePlayers(list, sid);
+  }, [buildLocalPlayerSnapshot]);
+
+  const pushBroadcastPresence = useCallback(() => {
+    if (soloModeRef.current) return;
+    const ch = broadcastChannelRef.current;
+    if (!ch) return;
+    lastBcPostMsRef.current = Date.now();
+    try {
+      ch.postMessage({
+        type: 'presence',
+        player: buildLocalPlayerSnapshot(),
+      });
+    } catch {
+      // Ignore closed channel
+    }
+  }, [buildLocalPlayerSnapshot]);
 
   const pushHttpPresence = useCallback(async () => {
     if (soloModeRef.current) return;
@@ -354,8 +420,9 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          studentId,
-          displayName: studentName,
+          sessionId: session.id,
+          studentId: activeStudentIdRef.current,
+          displayName: activeStudentNameRef.current,
           avatarColor: currentAvatarColorRef.current,
           skinId: currentSkinIdRef.current,
           ...latestLocalStateRef.current,
@@ -375,20 +442,59 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     } catch {
       // Ignore transient network errors during polling
     }
-  }, [session.joinCode, studentId, studentName, rebuildAndSyncPlayers]);
+  }, [session.id, session.joinCode, rebuildAndSyncPlayers]);
 
   const handleSetSoloMode = useCallback(
     (nextSolo: boolean) => {
       playSfx('uiClick');
       setSoloMode(nextSolo);
-      setToastMsg(
-        nextSolo
-          ? 'Mode Individual (Solo) aktif. Anda bermain sendiri tanpa avatar pemain lain.'
-          : 'Mode Multiplayer aktif! Menyinkronkan siswa lain di arena yang sama...'
-      );
+      if (nextSolo) {
+        setToastMsg('Mode Individual (Solo) aktif. Anda bermain sendiri tanpa avatar pemain lain.');
+      } else {
+        const hasCloud = Boolean(
+          auth.currentUser?.emailVerified && auth.currentUser.uid === activeStudentIdRef.current
+        );
+        setToastMsg(
+          hasCloud || !wsUnsupportedOnHost
+            ? 'Mode Multiplayer aktif! Menyinkronkan siswa lain di arena yang sama...'
+            : 'Mode Multiplayer aktif (Tab & Server Lokal). Aktifkan Cloud Sync di Pengaturan untuk sinkronisasi lintas HP.'
+        );
+      }
     },
     [playSfx]
   );
+
+  const handleActivateCloudMultiplayer = useCallback(async () => {
+    setCloudSyncBusy(true);
+    try {
+      const profile = await signInWithGoogleRole('siswa');
+      const prevId = activeStudentIdRef.current;
+      if (prevId && prevId !== profile.uid) {
+        fetch(
+          `/api/sessions/${encodeURIComponent(session.joinCode)}/players/${encodeURIComponent(prevId)}?sessionId=${encodeURIComponent(session.id)}`,
+          { method: 'DELETE', keepalive: true }
+        ).catch(() => undefined);
+        try {
+          broadcastChannelRef.current?.postMessage({ type: 'leave', studentId: prevId });
+        } catch {
+          // Ignore
+        }
+      }
+      setActiveStudentId(profile.uid);
+      if (profile.displayName) {
+        setActiveStudentName(profile.displayName);
+      }
+      setSoloMode(false);
+      setToastMsg('Cloud Multiplayer Google aktif! Pemain di perangkat lain pada sesi ini kini tersinkron.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('popup-closed-by-user') && !msg.includes('cancelled-popup-request')) {
+        setToastMsg('Gagal mengaktifkan Cloud Sync Google. Coba lagi atau izinkan popup browser.');
+      }
+    } finally {
+      setCloudSyncBusy(false);
+    }
+  }, [session.id, session.joinCode]);
 
   const loadQuestionIntoQuizModal = useCallback((q: StudentQuestion) => {
     setActiveQuestion(q);
@@ -522,19 +628,26 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
           };
           dirtyMoveRef.current = true;
           if (soloModeRef.current) return;
+          if (Date.now() - lastBcPostMsRef.current >= 70) {
+            pushBroadcastPresence();
+          }
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'player_move', ...state }));
           } else if (Date.now() - lastHttpPostMsRef.current >= 450) {
             void pushHttpPresence();
           }
-          if (auth.currentUser?.uid === studentId && Date.now() - lastFsPostMsRef.current >= 1500) {
+          if (
+            auth.currentUser?.uid === activeStudentIdRef.current &&
+            Date.now() - lastFsPostMsRef.current >= 1200
+          ) {
             lastFsPostMsRef.current = Date.now();
             void syncPlayerStateToFirestore({
               sessionId: session.id,
-              studentId,
-              displayName: studentName,
+              studentId: activeStudentIdRef.current,
+              displayName: activeStudentNameRef.current,
               avatarColor: currentAvatarColorRef.current,
+              skinId: currentSkinIdRef.current,
               ...state,
               isOnline: true,
             });
@@ -560,18 +673,19 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       document.body.dataset.state = 'title';
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentName]);
+  }, [activeStudentName]);
 
   // Live sync skin, color, arena, and camera preferences into Three.js engine + multiplayer room
   useEffect(() => {
-    engineRef.current?.setPlayerAppearance(currentSkinId, currentAvatarColor, studentName);
+    engineRef.current?.setPlayerAppearance(currentSkinId, currentAvatarColor, activeStudentName);
     if (!soloModeRef.current) {
+      pushBroadcastPresence();
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(
           JSON.stringify({
             type: 'player_update',
-            displayName: studentName,
+            displayName: activeStudentName,
             avatarColor: currentAvatarColor,
             skinId: currentSkinId,
             ...latestLocalStateRef.current,
@@ -580,8 +694,20 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       } else {
         void pushHttpPresence();
       }
+      if (auth.currentUser?.uid === activeStudentIdRef.current) {
+        lastFsPostMsRef.current = Date.now();
+        void syncPlayerStateToFirestore({
+          sessionId: session.id,
+          studentId: activeStudentIdRef.current,
+          displayName: activeStudentName,
+          avatarColor: currentAvatarColor,
+          skinId: currentSkinId,
+          ...latestLocalStateRef.current,
+          isOnline: true,
+        });
+      }
     }
-  }, [currentSkinId, currentAvatarColor, studentName, pushHttpPresence]);
+  }, [currentSkinId, currentAvatarColor, activeStudentName, session.id, pushBroadcastPresence, pushHttpPresence]);
 
   useEffect(() => {
     engineRef.current?.setArenaTheme(currentArenaId);
@@ -703,19 +829,25 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleMute]);
 
-  // Real-time Dual-Transport Multiplayer Connection (WebSocket + HTTP Room Sync + Firestore mirror)
+  // Real-time Multi-Transport Multiplayer Connection (WebSocket + BroadcastChannel + HTTP Room Sync + Firestore)
   useEffect(() => {
     const leaveRoomEverywhere = () => {
+      try {
+        broadcastChannelRef.current?.postMessage({ type: 'leave', studentId: activeStudentId });
+      } catch {
+        // Ignore
+      }
       fetch(
-        `/api/sessions/${encodeURIComponent(session.joinCode)}/players/${encodeURIComponent(studentId)}`,
+        `/api/sessions/${encodeURIComponent(session.joinCode)}/players/${encodeURIComponent(activeStudentId)}?sessionId=${encodeURIComponent(session.id)}`,
         { method: 'DELETE', keepalive: true }
       ).catch(() => undefined);
-      if (auth.currentUser?.uid === studentId) {
+      if (auth.currentUser?.uid === activeStudentId) {
         void syncPlayerStateToFirestore({
           sessionId: session.id,
-          studentId,
-          displayName: studentName,
+          studentId: activeStudentId,
+          displayName: activeStudentName,
           avatarColor: currentAvatarColorRef.current,
+          skinId: currentSkinIdRef.current,
           ...latestLocalStateRef.current,
           isOnline: false,
         });
@@ -725,102 +857,155 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     if (soloMode) {
       wsRef.current?.close();
       wsRef.current = null;
+      broadcastChannelRef.current?.close();
+      broadcastChannelRef.current = null;
       wsPlayersRef.current.clear();
+      bcPlayersRef.current.clear();
       httpPlayersRef.current.clear();
       fsPlayersRef.current.clear();
       setWsConnected(false);
+      setBroadcastSyncReady(false);
       setHttpSyncReady(false);
       setOnlinePlayers([]);
-      engineRef.current?.syncRemotePlayers([], studentId);
+      engineRef.current?.syncRemotePlayers([], activeStudentId);
       leaveRoomEverywhere();
       return;
     }
 
     let cancelled = false;
+    let wsOpenedOnce = false;
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let ws: WebSocket | null = null;
 
-    try {
-      ws = new WebSocket(`${proto}//${window.location.host}/ws`);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (cancelled) return;
-        setWsConnected(true);
-        ws?.send(
-          JSON.stringify({
-            type: 'join_room',
-            sessionId: session.id,
-            studentId,
-            displayName: studentName,
-            role: 'siswa',
-            avatarColor: currentAvatarColorRef.current,
-            skinId: currentSkinIdRef.current,
-            ...latestLocalStateRef.current,
-          })
-        );
-      };
-
-      ws.onmessage = (evt) => {
-        if (cancelled) return;
-        try {
-          const msg = JSON.parse(String(evt.data));
-          if (msg.type === 'room_init') {
-            const list = (msg.players || []) as PlayerAvatarState[];
-            const nextMap = new Map<string, PlayerAvatarState>();
-            for (const p of list) {
-              nextMap.set(p.studentId, p);
-            }
-            wsPlayersRef.current = nextMap;
+    // 1. BroadcastChannel for instant multi-tab sync in the same browser (works 100% on Vercel)
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel(`eduverse-room-${session.joinCode.toUpperCase()}`);
+        broadcastChannelRef.current = bc;
+        setBroadcastSyncReady(true);
+        bc.onmessage = (evt) => {
+          if (cancelled) return;
+          const msg = evt.data as { type?: string; player?: PlayerAvatarState; studentId?: string } | null;
+          if (!msg || typeof msg !== 'object') return;
+          if (msg.type === 'presence' && msg.player && msg.player.studentId) {
+            if (msg.player.studentId === activeStudentId) return;
+            bcPlayersRef.current.set(msg.player.studentId, { ...msg.player, seenAtMs: Date.now() });
             rebuildAndSyncPlayers();
-          } else if (msg.type === 'player_joined' || msg.type === 'player_moved') {
-            const player = msg.player as PlayerAvatarState;
-            wsPlayersRef.current.set(player.studentId, player);
+          } else if (msg.type === 'ping') {
+            pushBroadcastPresence();
+          } else if (msg.type === 'leave' && msg.studentId) {
+            bcPlayersRef.current.delete(msg.studentId);
+            httpPlayersRef.current.delete(msg.studentId);
+            fsPlayersRef.current.delete(msg.studentId);
+            wsPlayersRef.current.delete(msg.studentId);
             rebuildAndSyncPlayers();
-          } else if (msg.type === 'player_left') {
-            const leftId = String(msg.studentId || '');
-            wsPlayersRef.current.delete(leftId);
-            httpPlayersRef.current.delete(leftId);
-            fsPlayersRef.current.delete(leftId);
-            rebuildAndSyncPlayers();
-          } else if (msg.type === 'progress_updated' && Array.isArray(msg.leaderboard)) {
-            setLeaderboard(msg.leaderboard);
-          } else if (msg.type === 'session_state_changed' && msg.session) {
-            const updated = msg.session as GameSession;
-            if (updated.status === 'ended' || !updated.isLinkActive) {
-              setSessionClosedNotice('Guru telah menonaktifkan atau mengakhiri sesi ini.');
-            }
           }
-        } catch {
-          // Ignore non-JSON frames
-        }
-      };
-
-      ws.onclose = () => {
-        if (!cancelled) setWsConnected(false);
-      };
-      ws.onerror = () => {
-        if (!cancelled) setWsConnected(false);
-      };
-    } catch {
-      setWsConnected(false);
+        };
+        bc.postMessage({ type: 'ping' });
+        pushBroadcastPresence();
+      } catch {
+        setBroadcastSyncReady(false);
+      }
     }
 
-    // Immediate HTTP presence sync (ensures instant visibility & works on Vercel serverless)
+    // 2. WebSocket transport (skip if host already proved not to support /ws upgrades, e.g. Vercel serverless)
+    if (!wsUnsupportedOnHost) {
+      try {
+        ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          wsOpenedOnce = true;
+          wsUnsupportedOnHost = false;
+          if (cancelled) return;
+          setWsConnected(true);
+          ws?.send(
+            JSON.stringify({
+              type: 'join_room',
+              sessionId: session.id,
+              studentId: activeStudentId,
+              displayName: activeStudentName,
+              role: 'siswa',
+              avatarColor: currentAvatarColorRef.current,
+              skinId: currentSkinIdRef.current,
+              ...latestLocalStateRef.current,
+            })
+          );
+        };
+
+        ws.onmessage = (evt) => {
+          if (cancelled) return;
+          try {
+            const msg = JSON.parse(String(evt.data));
+            if (msg.type === 'room_init') {
+              const list = (msg.players || []) as PlayerAvatarState[];
+              const nextMap = new Map<string, PlayerAvatarState>();
+              for (const p of list) {
+                nextMap.set(p.studentId, p);
+              }
+              wsPlayersRef.current = nextMap;
+              rebuildAndSyncPlayers();
+            } else if (msg.type === 'player_joined' || msg.type === 'player_moved') {
+              const player = msg.player as PlayerAvatarState;
+              wsPlayersRef.current.set(player.studentId, player);
+              rebuildAndSyncPlayers();
+            } else if (msg.type === 'player_left') {
+              const leftId = String(msg.studentId || '');
+              wsPlayersRef.current.delete(leftId);
+              bcPlayersRef.current.delete(leftId);
+              httpPlayersRef.current.delete(leftId);
+              fsPlayersRef.current.delete(leftId);
+              rebuildAndSyncPlayers();
+            } else if (msg.type === 'progress_updated' && Array.isArray(msg.leaderboard)) {
+              setLeaderboard(msg.leaderboard);
+            } else if (msg.type === 'session_state_changed' && msg.session) {
+              const updated = msg.session as GameSession;
+              if (updated.status === 'ended' || !updated.isLinkActive) {
+                setSessionClosedNotice('Guru telah menonaktifkan atau mengakhiri sesi ini.');
+              }
+            }
+          } catch {
+            // Ignore non-JSON frames
+          }
+        };
+
+        ws.onclose = () => {
+          if (!wsOpenedOnce) {
+            wsUnsupportedOnHost = true;
+          }
+          if (!cancelled) setWsConnected(false);
+        };
+        ws.onerror = () => {
+          if (!wsOpenedOnce) {
+            wsUnsupportedOnHost = true;
+          }
+          if (!cancelled) setWsConnected(false);
+        };
+      } catch {
+        wsUnsupportedOnHost = true;
+        setWsConnected(false);
+      }
+    }
+
+    // 3. Immediate HTTP presence sync (local/single-instance Node & warm serverless fallback)
+    rebuildAndSyncPlayers();
     void pushHttpPresence();
 
     const syncInterval = window.setInterval(() => {
       if (cancelled || soloModeRef.current) return;
       const wsOpen = wsRef.current?.readyState === WebSocket.OPEN;
       const elapsed = Date.now() - lastHttpPostMsRef.current;
-      // Poll faster (~800ms) when WS isn't open or player moved; keepalive (~3s) when WS is open
+      if (Date.now() - lastBcPostMsRef.current >= 2500) {
+        pushBroadcastPresence();
+      }
       if ((!wsOpen && elapsed >= 750) || (dirtyMoveRef.current && !wsOpen) || elapsed >= 3000) {
         dirtyMoveRef.current = false;
         void pushHttpPresence();
       }
     }, 500);
 
-    // Optional Firestore realtime mirror for Google-authenticated students across serverless instances
+    // 4. Firestore Cloud Sync (works across all phones/laptops worldwide on Vercel when signed in with Google)
     const unsubFs = subscribeSessionPlayerStates(session.id, (fsPlayers) => {
       if (cancelled) return;
       const nextFs = new Map<string, PlayerAvatarState>();
@@ -831,23 +1016,31 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       rebuildAndSyncPlayers();
     });
 
-    if (auth.currentUser?.uid === studentId) {
+    if (auth.currentUser?.uid === activeStudentId) {
       lastFsPostMsRef.current = Date.now();
       void syncPlayerStateToFirestore({
         sessionId: session.id,
-        studentId,
-        displayName: studentName,
+        studentId: activeStudentId,
+        displayName: activeStudentName,
         avatarColor: currentAvatarColorRef.current,
+        skinId: currentSkinIdRef.current,
         ...latestLocalStateRef.current,
         isOnline: true,
       });
     }
 
     const handlePageExit = () => {
+      try {
+        bc?.postMessage({ type: 'leave', studentId: activeStudentId });
+      } catch {
+        // Ignore
+      }
       if (navigator.sendBeacon) {
         navigator.sendBeacon(
           `/api/sessions/${encodeURIComponent(session.joinCode)}/players/leave`,
-          new Blob([JSON.stringify({ studentId })], { type: 'application/json' })
+          new Blob([JSON.stringify({ sessionId: session.id, studentId: activeStudentId })], {
+            type: 'application/json',
+          })
         );
       }
     };
@@ -861,8 +1054,21 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       ws?.close();
       wsRef.current = null;
       leaveRoomEverywhere();
+      bc?.close();
+      if (broadcastChannelRef.current === bc) {
+        broadcastChannelRef.current = null;
+      }
     };
-  }, [session.id, session.joinCode, studentId, studentName, soloMode, pushHttpPresence, rebuildAndSyncPlayers]);
+  }, [
+    session.id,
+    session.joinCode,
+    activeStudentId,
+    activeStudentName,
+    soloMode,
+    pushBroadcastPresence,
+    pushHttpPresence,
+    rebuildAndSyncPlayers,
+  ]);
 
   const xpStats = useMemo(
     () => calculateXpProgressInLevel(progress.xpEarned + bonusXp),
@@ -1289,7 +1495,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                   ? 'Mode Individual — Klik untuk ubah ke Multiplayer'
                   : 'Mode Multiplayer — Klik untuk ubah ke Individual'
               }
-              className={`inline-flex rounded-xl px-2.5 sm:px-3 py-2 border text-xs font-bold items-center gap-1.5 min-h-[40px] transition-colors ${
+              className={`inline-flex touch-manipulation cursor-pointer rounded-xl px-2.5 sm:px-3 py-2 border text-xs font-bold items-center gap-1.5 min-h-[40px] transition-colors ${
                 soloMode
                   ? 'bg-amber-950/90 hover:bg-amber-900 text-amber-200 border-amber-500/70'
                   : 'bg-emerald-950/90 hover:bg-emerald-900 text-emerald-100 border-emerald-500/70'
@@ -1311,7 +1517,9 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                   <span
                     aria-hidden="true"
                     className={`w-1.5 h-1.5 rounded-full ${
-                      wsConnected || httpSyncReady ? 'bg-emerald-400' : 'bg-amber-300 animate-pulse'
+                      wsConnected || httpSyncReady || broadcastSyncReady
+                        ? 'bg-emerald-400'
+                        : 'bg-amber-300 animate-pulse'
                     }`}
                   />
                 </>
@@ -2007,14 +2215,31 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                   </div>
 
                   {!soloMode && (
-                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                        Pemain di Arena Saat Ini ({Math.max(1, onlinePlayers.length)})
-                      </p>
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Pemain di Arena Saat Ini ({Math.max(1, onlinePlayers.length)})
+                        </p>
+                        {auth.currentUser?.emailVerified && auth.currentUser.uid === activeStudentId ? (
+                          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            Cloud Sync Lintas Perangkat Aktif
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid="activate-cloud-sync-btn"
+                            disabled={cloudSyncBusy}
+                            onClick={() => void handleActivateCloudMultiplayer()}
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold disabled:opacity-60"
+                          >
+                            {cloudSyncBusy ? 'Menghubungkan...' : 'Aktifkan Cloud Sync Lintas HP (Google)'}
+                          </button>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                         {onlinePlayers.length === 0 ? (
                           <span className="text-xs text-slate-500 dark:text-slate-400">
-                            {studentName} (Anda)
+                            {activeStudentName} (Anda)
                           </span>
                         ) : (
                           onlinePlayers.map((p) => (
@@ -2027,7 +2252,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                                 style={{ backgroundColor: p.avatarColor || '#3B82F6' }}
                               />
                               <span>{p.displayName}</span>
-                              {p.studentId === studentId && (
+                              {p.studentId === activeStudentId && (
                                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
                                   (Anda)
                                 </span>

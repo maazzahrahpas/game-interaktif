@@ -110,27 +110,47 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const startMusic = useCallback((initialIntensity: MusicIntensity = 'explore') => {
     setIntensityState(initialIntensity);
-    audioSynth.startMusic(initialIntensity);
-    setIsMusicPlaying(true);
+    try {
+      audioSynth.startMusic(initialIntensity);
+      setIsMusicPlaying(true);
+    } catch {
+      // Ignore Web Audio restriction errors
+    }
   }, []);
 
   const stopMusic = useCallback(() => {
-    audioSynth.stopMusic();
+    try {
+      audioSynth.stopMusic();
+    } catch {
+      // Ignore
+    }
     setIsMusicPlaying(false);
   }, []);
 
   const setIntensity = useCallback((nextIntensity: MusicIntensity) => {
     setIntensityState(nextIntensity);
-    audioSynth.setMusicIntensity(nextIntensity);
+    try {
+      audioSynth.setMusicIntensity(nextIntensity);
+    } catch {
+      // Ignore
+    }
   }, []);
 
   const setPaused = useCallback((paused: boolean) => {
     setIsPausedState(paused);
-    audioSynth.setPaused(paused);
+    try {
+      audioSynth.setPaused(paused);
+    } catch {
+      // Ignore
+    }
   }, []);
 
   const playSfx = useCallback((event: SfxEventName, streak = 1) => {
-    audioSynth.playSfx(event, streak);
+    try {
+      audioSynth.playSfx(event, streak);
+    } catch {
+      // Ignore Web Audio errors so UI click handlers never abort
+    }
   }, []);
 
   const resetAudioDefaults = useCallback(() => {

@@ -1305,12 +1305,15 @@ class EduverseServerStore {
     return { ok: true as const, updatedAt: cred.updatedAt };
   }
 
-  private resolveRoomSessionId(joinCodeOrSessionId: string): string {
+  private resolveRoomSessionId(joinCodeOrSessionId: string, fallbackSessionId?: string): string {
     const byCode = this.getSessionByCode(joinCodeOrSessionId);
     if (byCode) return byCode.id;
     const byId = this.db.gameSessions[joinCodeOrSessionId];
     if (byId) return byId.id;
-    return joinCodeOrSessionId.trim();
+    if (fallbackSessionId && fallbackSessionId.trim()) {
+      return fallbackSessionId.trim().slice(0, 128);
+    }
+    return joinCodeOrSessionId.trim().toUpperCase();
   }
 
   private pruneStaleRoomPlayers(roomId: string, maxAgeMs = 30000) {
@@ -1327,8 +1330,8 @@ class EduverseServerStore {
     }
   }
 
-  public getRoomPlayers(joinCodeOrSessionId: string): PlayerAvatarState[] {
-    const roomId = this.resolveRoomSessionId(joinCodeOrSessionId);
+  public getRoomPlayers(joinCodeOrSessionId: string, fallbackSessionId?: string): PlayerAvatarState[] {
+    const roomId = this.resolveRoomSessionId(joinCodeOrSessionId, fallbackSessionId);
     this.pruneStaleRoomPlayers(roomId);
     const room = this.roomPlayers.get(roomId);
     if (!room) return [];
@@ -1348,9 +1351,10 @@ class EduverseServerStore {
       rotY?: number;
       animState?: AnimState;
       currentZone?: WorldZoneId;
-    }
+    },
+    fallbackSessionId?: string
   ): { sessionId: string; player: PlayerAvatarState; players: PlayerAvatarState[] } {
-    const sessionId = this.resolveRoomSessionId(joinCodeOrSessionId);
+    const sessionId = this.resolveRoomSessionId(joinCodeOrSessionId, fallbackSessionId);
     this.pruneStaleRoomPlayers(sessionId);
 
     let room = this.roomPlayers.get(sessionId);
@@ -1403,8 +1407,8 @@ class EduverseServerStore {
     };
   }
 
-  public removeRoomPlayer(joinCodeOrSessionId: string, studentId: string): PlayerAvatarState[] {
-    const sessionId = this.resolveRoomSessionId(joinCodeOrSessionId);
+  public removeRoomPlayer(joinCodeOrSessionId: string, studentId: string, fallbackSessionId?: string): PlayerAvatarState[] {
+    const sessionId = this.resolveRoomSessionId(joinCodeOrSessionId, fallbackSessionId);
     const room = this.roomPlayers.get(sessionId);
     if (!room) return [];
     room.delete(String(studentId || '').trim());

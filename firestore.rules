@@ -292,7 +292,7 @@ service cloud.firestore {
           'x', 'y', 'z', 'rotY', 'animState', 'currentZone', 'isOnline', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'sessionId', 'studentId', 'displayName', 'avatarColor',
+          'id', 'sessionId', 'studentId', 'displayName', 'avatarColor', 'skinId',
           'x', 'y', 'z', 'rotY', 'animState', 'currentZone', 'isOnline', 'updatedAt'
         ])
         && isValidId(data.id)
@@ -300,6 +300,7 @@ service cloud.firestore {
         && isValidId(data.studentId)
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
         && data.avatarColor is string && data.avatarColor.size() >= 4 && data.avatarColor.size() <= 20
+        && (!('skinId' in data) || (data.skinId is string && data.skinId in ['explorer', 'cyber_knight', 'bio_scientist', 'arcane_scholar', 'astro_pilot', 'ninja_logic']))
         && data.x is number && data.x >= -500 && data.x <= 500
         && data.y is number && data.y >= -50 && data.y <= 200
         && data.z is number && data.z >= -500 && data.z <= 500
@@ -614,7 +615,7 @@ service cloud.firestore {
         && isValidPlayerState(incoming())
         && incoming().id == stateId
         && incoming().studentId == request.auth.uid
-        && exists(/databases/$(database)/documents/gameSessions/$(incoming().sessionId))
+        && (incoming().sessionId in ['sess_edu101', 'sess_fis202'] || exists(/databases/$(database)/documents/gameSessions/$(incoming().sessionId)))
         && incoming().updatedAt == request.time;
       allow update: if isSignedIn() && isVerified() && isValidId(stateId) && isValidPlayerState(incoming()) && (
         isAdmin() || (
@@ -624,7 +625,7 @@ service cloud.firestore {
           && incoming().studentId == existing().studentId
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly([
-            'displayName', 'avatarColor', 'x', 'y', 'z', 'rotY', 'animState', 'currentZone', 'isOnline', 'updatedAt'
+            'displayName', 'avatarColor', 'skinId', 'x', 'y', 'z', 'rotY', 'animState', 'currentZone', 'isOnline', 'updatedAt'
           ])
         )
       );

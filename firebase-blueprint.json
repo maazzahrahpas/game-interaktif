@@ -270,6 +270,10 @@
         "studentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
         "avatarColor": { "type": "string", "maxLength": 20 },
+        "skinId": {
+          "type": "string",
+          "enum": ["explorer", "cyber_knight", "bio_scientist", "arcane_scholar", "astro_pilot", "ninja_logic"]
+        },
         "x": { "type": "number" },
         "y": { "type": "number" },
         "z": { "type": "number" },
