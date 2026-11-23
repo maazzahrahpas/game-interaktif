@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
+  CheckCircle2,
+  Clock,
   Compass,
   Flame,
   Gamepad2,
@@ -8,11 +10,16 @@ import {
   Loader2,
   LogOut,
   Map as MapIcon,
+  Monitor,
+  Navigation,
   Pause,
   RotateCcw,
   Settings,
+  Shield,
   ShieldAlert,
+  Smartphone,
   Sparkles,
+  Tablet,
   Timer,
   Trophy,
   Users,
@@ -21,20 +28,38 @@ import {
   Wifi,
   WifiOff,
   X,
+  XCircle,
+  Zap,
 } from 'lucide-react';
 import { EduverseWorldEngine } from '../game/EduverseWorldEngine.ts';
-import { shouldAutoEnableTouchControls } from '../game/touchControls.ts';
+import {
+  DEFAULT_SKIN_ID,
+  getArenaTheme,
+  getCharacterSkin,
+  resolveArenaIdFromSession,
+  type RadarBlipTarget,
+} from '../game/gameCatalog.ts';
+import {
+  getDeviceProfile,
+  getTouchControlScaleValue,
+  shouldAutoEnableTouchControls,
+} from '../game/touchControls.ts';
 import { useAudio } from '../contexts/AudioContext.tsx';
+import { ArenaSkinSelector } from './ArenaSkinSelector.tsx';
 import { AudioSettingsPanel } from './AudioSettingsPanel.tsx';
 import { MobileActionPad } from './MobileActionPad.tsx';
 import { VirtualJoystick } from './VirtualJoystick.tsx';
 import type {
   AchievementBadge,
+  ArenaThemeId,
+  CharacterSkinId,
+  DeviceProfile,
   GameSession,
   LeaderboardEntry,
   PlayerAvatarState,
   StudentProgress,
   StudentQuestion,
+  TouchControlSize,
   WorldZoneId,
 } from '../types/eduverse.ts';
 import {
@@ -43,6 +68,7 @@ import {
   calculateStreakMultiplier,
   calculateXpProgressInLevel,
   computeMusicIntensity,
+  getQuizFeverStatus,
   resolveHazardHit,
   WORLD_ZONES,
 } from '../utils/gameRules.ts';
@@ -55,6 +81,9 @@ interface WorldPlayViewProps {
   studentId: string;
   studentName: string;
   avatarColor: string;
+  skinId?: CharacterSkinId;
+  arenaId?: ArenaThemeId;
+  openQuizOnStart?: boolean;
   onExitWorld: (latestProgress: StudentProgress) => void;
 }
 
@@ -93,16 +122,28 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   studentId,
   studentName,
   avatarColor,
+  skinId,
+  arenaId,
+  openQuizOnStart = false,
   onExitWorld,
 }) => {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<EduverseWorldEngine | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
+  const [currentArenaId, setCurrentArenaId] = useState<ArenaThemeId>(
+    () => arenaId || resolveArenaIdFromSession(session)
+  );
+  const [currentSkinId, setCurrentSkinId] = useState<CharacterSkinId>(
+    () => skinId || DEFAULT_SKIN_ID
+  );
+  const [currentAvatarColor, setCurrentAvatarColor] = useState<string>(avatarColor);
+
   const [progress, setProgress] = useState<StudentProgress>(initialProgress);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(initialLeaderboard);
   const [activeZone, setActiveZone] = useState<WorldZoneId>(initialProgress.currentZone || 'sekolah');
   const [nearNpcZone, setNearNpcZone] = useState<(typeof WORLD_ZONES)[number] | null>(null);
+  const [radarBlips, setRadarBlips] = useState<RadarBlipTarget[]>([]);
   const [crystalsCollected, setCrystalsCollected] = useState(0);
   const [bonusXp, setBonusXp] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -126,7 +167,25 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   const [wsConnected, setWsConnected] = useState(false);
   const [soloMode, setSoloMode] = useState(false);
   const [onlinePlayers, setOnlinePlayers] = useState<PlayerAvatarState[]>([]);
+
+  // Cross-Device Ergonomics (Phone / Tablet / Desktop)
   const touchOverriddenRef = useRef(false);
+  const [deviceProfile, setDeviceProfile] = useState<DeviceProfile>(() => {
+    if (typeof window === 'undefined') return 'desktop';
+    return getDeviceProfile({
+      hasCoarsePointer: window.matchMedia?.('(pointer: coarse)')?.matches ?? false,
+      maxTouchPoints: navigator.maxTouchPoints ?? 0,
+      viewportWidth: window.innerWidth,
+    });
+  });
+  const [isPortraitPhone, setIsPortraitPhone] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 640 && window.innerHeight > window.innerWidth;
+  });
+  const [portraitDismissed, setPortraitDismissed] = useState(false);
+  const [touchSize, setTouchSize] = useState<TouchControlSize>('normal');
+  const [cameraSensitivity, setCameraSensitivity] = useState<number>(1.0);
+  const [autoFollowCamera, setAutoFollowCamera] = useState<boolean>(() => deviceProfile !== 'desktop');
   const [showTouchPad, setShowTouchPad] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return shouldAutoEnableTouchControls({
@@ -142,25 +201,55 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   };
 
   useEffect(() => {
-    const syncTouchMode = () => {
-      if (touchOverriddenRef.current) return;
-      setShowTouchPad(
-        shouldAutoEnableTouchControls({
-          hasCoarsePointer: window.matchMedia?.('(pointer: coarse)')?.matches ?? false,
-          maxTouchPoints: navigator.maxTouchPoints ?? 0,
-          viewportWidth: window.innerWidth,
+    const syncDeviceAndTouch = () => {
+      const hasCoarse = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+      const touchPts = navigator.maxTouchPoints ?? 0;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      setDeviceProfile(
+        getDeviceProfile({
+          hasCoarsePointer: hasCoarse,
+          maxTouchPoints: touchPts,
+          viewportWidth: vw,
         })
       );
+      setIsPortraitPhone(vw < 640 && vh > vw);
+      if (!touchOverriddenRef.current) {
+        setShowTouchPad(
+          shouldAutoEnableTouchControls({
+            hasCoarsePointer: hasCoarse,
+            maxTouchPoints: touchPts,
+            viewportWidth: vw,
+          })
+        );
+      }
     };
-    window.addEventListener('resize', syncTouchMode);
-    return () => window.removeEventListener('resize', syncTouchMode);
+    window.addEventListener('resize', syncDeviceAndTouch);
+    return () => window.removeEventListener('resize', syncDeviceAndTouch);
   }, []);
+
   const [secondsLeft, setSecondsLeft] = useState(session.durationMinutes * 60);
   const [questTimer, setQuestTimer] = useState(25);
   const [defeatReason, setDefeatReason] = useState<'shields' | 'timeout'>('shields');
 
+  // Quiz Power-Up Lifelines & History
+  const [lifelines, setLifelines] = useState({
+    fifty_fifty: 1,
+    freeze_time: 1,
+    shield_boost: 1,
+  });
+  const [eliminatedOptions, setEliminatedOptions] = useState<number[]>([]);
+  const [lifelineBusy, setLifelineBusy] = useState(false);
+  const [timeFrozen, setTimeFrozen] = useState(false);
+  const [answerHistory, setAnswerHistory] = useState<
+    Array<{ questionId: string; prompt: string; isCorrect: boolean; pointsEarned: number }>
+  >([]);
+
   // Overlays
-  const [activeModal, setActiveModal] = useState<'none' | 'quest' | 'map' | 'leaderboard' | 'settings' | 'pause' | 'victory' | 'defeat'>('none');
+  const [activeModal, setActiveModal] = useState<
+    'none' | 'quest' | 'map' | 'leaderboard' | 'settings' | 'pause' | 'victory' | 'defeat'
+  >('none');
+  const [settingsTab, setSettingsTab] = useState<'audio' | 'controls' | 'appearance'>('audio');
   const [activeQuestion, setActiveQuestion] = useState<StudentQuestion | null>(null);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -191,48 +280,72 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   const shieldHpRef = useRef(shieldHp);
   shieldHpRef.current = shieldHp;
 
-  const ensureAudioPlaying = () => {
+  const ensureAudioPlaying = useCallback(() => {
     if (!isMusicPlaying) {
       startMusic('explore');
     }
-  };
+  }, [isMusicPlaying, startMusic]);
 
   const audioActionsRef = useRef({ startMusic, stopMusic, playSfx });
   audioActionsRef.current = { startMusic, stopMusic, playSfx };
 
-  const openQuestForZone = (zone: (typeof WORLD_ZONES)[number]) => {
-    ensureAudioPlaying();
-    playSfx('uiClick');
-    const p = progressRef.current;
-    if (!p.unlockedZones.includes(zone.id)) {
-      setToastMsg(
-        `Zona ${zone.name} masih terkunci! Jawab ${zone.requiredCorrect} soal dengan benar untuk membuka gerbang.`
-      );
-      return;
-    }
-    const qs = questionsRef.current;
-    const zoneQuestions = qs.filter((q) => (q.zoneId || 'sekolah') === zone.id);
-    const pendingInZone =
-      zoneQuestions.find((q) => !p.completedQuests.includes(q.id)) ||
-      qs.find((q) => !p.completedQuests.includes(q.id)) ||
-      zoneQuestions[0] ||
-      qs[0] ||
-      null;
-
-    if (!pendingInZone) {
-      setToastMsg('Belum ada soal di sesi ini.');
-      return;
-    }
-
-    setActiveQuestion(pendingInZone);
+  const loadQuestionIntoQuizModal = useCallback((q: StudentQuestion) => {
+    setActiveQuestion(q);
     setSelectedOption(null);
+    setEliminatedOptions([]);
+    setTimeFrozen(false);
     setGradeFeedback(null);
     setAiHint(null);
     setAiExplain(null);
     setAiError(null);
     setQuestTimer(25);
     setActiveModal('quest');
-  };
+  }, []);
+
+  const openQuestForZone = useCallback(
+    (zone: (typeof WORLD_ZONES)[number]) => {
+      ensureAudioPlaying();
+      playSfx('uiClick');
+      const p = progressRef.current;
+      if (!p.unlockedZones.includes(zone.id)) {
+        setToastMsg(
+          `Zona ${zone.name} masih terkunci! Jawab ${zone.requiredCorrect} soal dengan benar untuk membuka gerbang.`
+        );
+        return;
+      }
+      const qs = questionsRef.current;
+      const zoneQuestions = qs.filter((q) => (q.zoneId || 'sekolah') === zone.id);
+      const pendingInZone =
+        zoneQuestions.find((q) => !p.completedQuests.includes(q.id)) ||
+        qs.find((q) => !p.completedQuests.includes(q.id)) ||
+        zoneQuestions[0] ||
+        qs[0] ||
+        null;
+
+      if (!pendingInZone) {
+        setToastMsg('Belum ada soal di sesi ini.');
+        return;
+      }
+      loadQuestionIntoQuizModal(pendingInZone);
+    },
+    [ensureAudioPlaying, playSfx, loadQuestionIntoQuizModal]
+  );
+
+  const openNextPendingQuiz = useCallback(() => {
+    ensureAudioPlaying();
+    playSfx('uiClick');
+    const p = progressRef.current;
+    const qs = questionsRef.current;
+    const nextQ =
+      qs.find((q) => !p.completedQuests.includes(q.id)) ||
+      qs[0] ||
+      null;
+    if (!nextQ) {
+      setToastMsg('Semua soal sesi telah tersedia atau kosong.');
+      return;
+    }
+    loadQuestionIntoQuizModal(nextQ);
+  }, [ensureAudioPlaying, playSfx, loadQuestionIntoQuizModal]);
 
   const openQuestRef = useRef(openQuestForZone);
   openQuestRef.current = openQuestForZone;
@@ -246,13 +359,18 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     const engine = new EduverseWorldEngine(el, {
       mode: 'playing',
       playerName: studentName,
-      avatarColor,
+      avatarColor: currentAvatarColor,
+      skinId: currentSkinId,
+      arenaId: currentArenaId,
+      cameraSensitivity,
+      autoFollowCamera,
       callbacks: {
         onZoneChange: (z) => setActiveZone(z),
         onNearNpcChange: (npc) => setNearNpcZone(npc),
         onInteractNpc: (zone) => openQuestRef.current(zone),
         onDashStaminaChange: (pct) => setDashStamina(pct),
         onNearHazardChange: (near) => setNearHazard(near),
+        onRadarUpdate: (blips) => setRadarBlips(blips),
         onHazardHit: (reason) => {
           const outcome = resolveHazardHit({
             hp: shieldHpRef.current,
@@ -269,16 +387,27 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
           }
         },
         onCollectCrystal: (_id, xpEarned, timeBonus, isGolden) => {
-          setCrystalsCollected((c) => c + 1);
-          setBonusXp((x) => x + xpEarned);
+          const mult = getArenaTheme(currentArenaId).bonusCrystalMultiplier;
+          const boostedXp = Math.round(xpEarned * mult);
+          setCrystalsCollected((c) => {
+            const nextCount = c + 1;
+            if (nextCount % 2 === 0) {
+              setLifelines((prev) => ({
+                ...prev,
+                fifty_fifty: Math.min(3, prev.fifty_fifty + 1),
+              }));
+            }
+            return nextCount;
+          });
+          setBonusXp((x) => x + boostedXp);
           if (timeBonus > 0) {
             setSecondsLeft((s) => s + timeBonus);
           }
           if (isGolden) {
             setShieldHp((hp) => Math.min(3, hp + 1));
-            setToastMsg(`Kristal Chrono Emas! +${xpEarned} XP · +${timeBonus}d Waktu · +1 Perisai`);
+            setToastMsg(`Kristal Chrono Emas! +${boostedXp} XP · +${timeBonus}d Waktu · +1 Perisai`);
           } else {
-            setToastMsg(`Kristal Wawasan ditemukan! +${xpEarned} XP`);
+            setToastMsg(`Kristal Wawasan ditemukan! +${boostedXp} XP`);
           }
         },
         onLocalMoveBroadcast: (state) => {
@@ -307,7 +436,33 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       engineRef.current = null;
       document.body.dataset.state = 'title';
     };
-  }, [studentName, avatarColor]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentName]);
+
+  // Live sync skin, color, arena, and camera preferences into Three.js engine
+  useEffect(() => {
+    engineRef.current?.setPlayerAppearance(currentSkinId, currentAvatarColor, studentName);
+  }, [currentSkinId, currentAvatarColor, studentName]);
+
+  useEffect(() => {
+    engineRef.current?.setArenaTheme(currentArenaId);
+  }, [currentArenaId]);
+
+  useEffect(() => {
+    engineRef.current?.setCameraOptions({
+      sensitivity: cameraSensitivity,
+      autoFollow: autoFollowCamera,
+    });
+  }, [cameraSensitivity, autoFollowCamera]);
+
+  // Optionally jump straight into Quiz Blitz when launched via "Kuis Arena Lengkap"
+  useEffect(() => {
+    if (!openQuizOnStart) return;
+    const t = window.setTimeout(() => {
+      openNextPendingQuiz();
+    }, 350);
+    return () => clearTimeout(t);
+  }, [openQuizOnStart, openNextPendingQuiz]);
 
   // Sync unlocked zones & completed zone markers into Three.js engine
   useEffect(() => {
@@ -433,7 +588,8 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
           studentId,
           displayName: studentName,
           role: 'siswa',
-          avatarColor,
+          avatarColor: currentAvatarColor,
+          skinId: currentSkinId,
           x: 0,
           y: 0,
           z: 14,
@@ -483,7 +639,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       ws.close();
       wsRef.current = null;
     };
-  }, [session.id, studentId, studentName, avatarColor, soloMode]);
+  }, [session.id, studentId, studentName, currentAvatarColor, currentSkinId, soloMode]);
 
   const xpStats = useMemo(
     () => calculateXpProgressInLevel(progress.xpEarned + bonusXp),
@@ -513,7 +669,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     setToastMsg('Perisai Energi dipulihkan! Hindari Drone & Laser dengan [Shift/Q] Dash.');
   };
 
-  const handleSubmitAnswer = async () => {
+  const handleSubmitAnswer = useCallback(async () => {
     if (!activeQuestion || selectedOption === null) return;
     setSubmitting(true);
     setAiError(null);
@@ -543,6 +699,12 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       if (data.isCorrect) {
         const nextStreak = streak + 1;
         setStreak(nextStreak);
+        if (nextStreak % 2 === 0) {
+          setLifelines((prev) => ({
+            ...prev,
+            freeze_time: Math.min(3, prev.freeze_time + 1),
+          }));
+        }
         if (nextStreak >= 2) {
           playSfx('combo', nextStreak);
         } else {
@@ -557,6 +719,15 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       if (Array.isArray(data.leaderboard)) {
         setLeaderboard(data.leaderboard);
       }
+      setAnswerHistory((prev) => [
+        ...prev.filter((h) => h.questionId !== activeQuestion.id),
+        {
+          questionId: activeQuestion.id,
+          prompt: activeQuestion.prompt,
+          isCorrect: Boolean(data.isCorrect),
+          pointsEarned: Number(data.pointsEarned || 0),
+        },
+      ]);
       setGradeFeedback({
         isCorrect: data.isCorrect,
         pointsEarned: data.pointsEarned,
@@ -577,7 +748,105 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     } finally {
       setSubmitting(false);
     }
+  }, [activeQuestion, selectedOption, session.joinCode, studentId, studentName, streak, questTimer, playSfx]);
+
+  const handleUseFiftyFifty = async () => {
+    if (!activeQuestion || gradeFeedback || lifelines.fifty_fifty <= 0 || lifelineBusy) return;
+    setLifelineBusy(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.joinCode)}/lifeline-5050`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionId: activeQuestion.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok || !Array.isArray(data.eliminatedIndices)) {
+        setAiError(data?.error || 'Power-up 50:50 tidak dapat digunakan untuk soal ini.');
+        return;
+      }
+      playSfx('uiClick');
+      setEliminatedOptions(data.eliminatedIndices);
+      if (selectedOption !== null && data.eliminatedIndices.includes(selectedOption)) {
+        setSelectedOption(null);
+      }
+      setLifelines((prev) => ({ ...prev, fifty_fifty: Math.max(0, prev.fifty_fifty - 1) }));
+    } catch {
+      setAiError('Gagal menghubungi server untuk 50:50.');
+    } finally {
+      setLifelineBusy(false);
+    }
   };
+
+  const handleUseFreezeTime = () => {
+    if (gradeFeedback || lifelines.freeze_time <= 0) return;
+    playSfx('unlock');
+    setQuestTimer((t) => Math.min(45, t + 12));
+    setTimeFrozen(true);
+    setLifelines((prev) => ({ ...prev, freeze_time: Math.max(0, prev.freeze_time - 1) }));
+  };
+
+  const handleUseShieldBoost = () => {
+    if (lifelines.shield_boost <= 0) return;
+    playSfx('unlock');
+    setShieldHp((hp) => Math.min(3, hp + 1));
+    setLifelines((prev) => ({ ...prev, shield_boost: Math.max(0, prev.shield_boost - 1) }));
+    setToastMsg('Perisai Energi dipulihkan +1!');
+  };
+
+  // Quiz Keyboard Shortcuts: 1-5 / A-E select option, Enter submit / advance
+  useEffect(() => {
+    if (activeModal !== 'quest' || !activeQuestion) return;
+    const onQuizKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (!gradeFeedback) {
+        const keyMap: Record<string, number> = {
+          Digit1: 0,
+          Digit2: 1,
+          Digit3: 2,
+          Digit4: 3,
+          Digit5: 4,
+          KeyA: 0,
+          KeyB: 1,
+          KeyC: 2,
+          KeyD: 3,
+          KeyE: 4,
+        };
+        const idx = keyMap[e.code];
+        if (
+          typeof idx === 'number' &&
+          idx < activeQuestion.options.length &&
+          !eliminatedOptions.includes(idx)
+        ) {
+          setSelectedOption(idx);
+        } else if (e.code === 'Enter' && selectedOption !== null && !submitting) {
+          e.preventDefault();
+          void handleSubmitAnswer();
+        }
+      } else if (e.code === 'Enter') {
+        e.preventDefault();
+        if (progress.status === 'completed') {
+          setActiveModal('victory');
+        } else {
+          openNextPendingQuiz();
+        }
+      }
+    };
+    window.addEventListener('keydown', onQuizKey);
+    return () => window.removeEventListener('keydown', onQuizKey);
+  }, [
+    activeModal,
+    activeQuestion,
+    gradeFeedback,
+    eliminatedOptions,
+    selectedOption,
+    submitting,
+    progress.status,
+    handleSubmitAnswer,
+    openNextPendingQuiz,
+  ]);
 
   const handleRequestAiHint = async () => {
     if (!activeQuestion) return;
@@ -652,6 +921,14 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       ? 'Zona Tantangan'
       : 'Aman';
 
+  const feverStatus = useMemo(() => getQuizFeverStatus(streak), [streak]);
+  const touchScaleVal = useMemo(
+    () => getTouchControlScaleValue(touchSize, deviceProfile),
+    [touchSize, deviceProfile]
+  );
+  const currentArena = getArenaTheme(currentArenaId);
+  const currentSkin = getCharacterSkin(currentSkinId);
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-sky-200 select-none touch-none overscroll-none">
       {/* Isolated 3D Canvas Container (no React HUD children inside) */}
@@ -667,13 +944,15 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                 <div
                   className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center font-bold text-xs sm:text-sm text-white shrink-0"
-                  style={{ backgroundColor: avatarColor }}
+                  style={{ backgroundColor: currentAvatarColor }}
                 >
                   Lv.{xpStats.level}
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs sm:text-sm font-bold truncate">{studentName}</p>
-                  <p className="text-[11px] sm:text-xs text-sky-300 truncate">{currentZoneInfo.name}</p>
+                  <p className="text-[11px] sm:text-xs text-sky-300 truncate">
+                    {currentZoneInfo.name} · {currentArena.name}
+                  </p>
                 </div>
               </div>
 
@@ -734,6 +1013,24 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
             </div>
           </div>
 
+          {/* Top-Center Live Compass Radar (Compact & Non-Blocking) */}
+          {radarBlips.length > 0 && (
+            <div className="pointer-events-auto hidden md:flex items-center gap-3 rounded-xl bg-slate-900/90 text-white px-3.5 py-2 border border-slate-700/80 text-xs shadow">
+              {radarBlips.map((blip) => (
+                <div key={`${blip.type}-${blip.zoneId}`} className="flex items-center gap-1.5">
+                  <Navigation
+                    className={`w-3.5 h-3.5 ${
+                      blip.type === 'crystal' ? 'text-amber-400' : 'text-sky-400'
+                    }`}
+                    style={{ transform: `rotate(${Math.round((blip.angleRad * 180) / Math.PI)}deg)` }}
+                  />
+                  <span className="font-semibold">{blip.label}</span>
+                  <span className="font-mono text-[11px] text-slate-300">{blip.distanceMeters}m</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Top-Right Compact Utility Controls */}
           <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
             <div
@@ -747,6 +1044,17 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               <span className="hidden sm:inline" aria-hidden="true">·</span>
               <span>{formatClock(secondsLeft)}</span>
             </div>
+
+            <button
+              type="button"
+              onClick={openNextPendingQuiz}
+              aria-label="Buka Kuis Arena"
+              data-testid="hud-quiz-blitz-btn"
+              className="rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 px-2.5 sm:px-3 py-2 text-xs font-extrabold inline-flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px]"
+            >
+              <Zap className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden sm:inline">Kuis</span>
+            </button>
 
             <button
               type="button"
@@ -792,7 +1100,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               type="button"
               onClick={toggleTouchPad}
               aria-label={showTouchPad ? 'Matikan Kontrol Sentuh HP' : 'Aktifkan Kontrol Sentuh HP'}
-              title="Kontrol Sentuh Layar HP"
+              title="Kontrol Sentuh Layar HP & Tablet"
               className={`rounded-xl px-2.5 py-2 border text-xs font-semibold inline-flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px] ${
                 showTouchPad
                   ? 'bg-emerald-700/95 border-emerald-400 text-white'
@@ -821,9 +1129,10 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               onClick={() => {
                 ensureAudioPlaying();
                 playSfx('uiClick');
+                setSettingsTab('audio');
                 setActiveModal('settings');
               }}
-              aria-label="Pengaturan Audio"
+              aria-label="Pengaturan Game, Audio & Skin"
               className="rounded-xl bg-slate-900/92 hover:bg-slate-800 text-white px-2.5 sm:px-3 py-2 border border-slate-700/80 text-xs font-semibold inline-flex items-center justify-center gap-1.5 min-w-[40px] min-h-[40px]"
             >
               <Settings className="w-4 h-4 text-sky-400" />
@@ -841,8 +1150,22 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
           </div>
         </div>
 
-        {/* Center Notification Toast */}
+        {/* Center Notification Toast & Non-Blocking Portrait Tip */}
         <div className="flex flex-col items-center gap-2">
+          {isPortraitPhone && !portraitDismissed && activeModal === 'none' && (
+            <div className="pointer-events-auto rounded-xl bg-slate-900/95 text-sky-200 px-3.5 py-2 border border-sky-500/40 text-xs font-medium flex items-center gap-2.5 shadow">
+              <Smartphone className="w-4 h-4 text-sky-400 shrink-0" />
+              <span>Tip HP: Putar layar mendatar (landscape) agar kontrol lebih luas.</span>
+              <button
+                type="button"
+                aria-label="Tutup tip orientasi"
+                onClick={() => setPortraitDismissed(true)}
+                className="p-1 rounded hover:bg-slate-800 text-slate-300"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {sessionClosedNotice && (
             <div className="pointer-events-auto rounded-xl bg-rose-900/95 text-white px-5 py-3 border border-rose-500 text-sm font-semibold flex items-center gap-3">
               <span>{sessionClosedNotice}</span>
@@ -880,6 +1203,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
             {showTouchPad ? (
               <VirtualJoystick
                 disabled={activeModal !== 'none'}
+                scaleMultiplier={touchScaleVal}
                 onMove={(dx, dy, isSprinting) => {
                   engineRef.current?.setVirtualInput(dx, dy, isSprinting);
                 }}
@@ -908,7 +1232,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               <div className="rounded-xl bg-slate-900/90 text-slate-200 px-4 py-1.5 text-xs border border-slate-700/80 whitespace-nowrap">
                 {showTouchPad
                   ? 'Analog Kiri Gerak · Dorong ke Tepi untuk Lari · Geser Layar Putar Kamera · Cubit Zoom'
-                  : 'WASD Gerak · Shift/Q Dash · Spasi Lompat · Seret Kamera · E Interaksi'}
+                  : 'WASD Gerak · Shift/Q Dash · Spasi Lompat · Seret Kamera · E Interaksi · Gamepad Didukung'}
               </div>
             </div>
 
@@ -916,6 +1240,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               <MobileActionPad
                 dashStamina={dashStamina}
                 nearNpcZone={nearNpcZone}
+                scaleMultiplier={touchScaleVal}
                 onJumpStart={() => {
                   ensureAudioPlaying();
                   engineRef.current?.triggerJump();
@@ -929,7 +1254,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                   if (nearNpcZone) {
                     openQuestForZone(nearNpcZone);
                   } else {
-                    openQuestForZone(currentZoneInfo);
+                    openNextPendingQuiz();
                   }
                 }}
                 onResetCamera={() => engineRef.current?.resetCameraBehindPlayer()}
@@ -949,36 +1274,45 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
         </div>
       </div>
 
-      {/* ==================== MODAL: NPC QUEST & HIGH-STAKES QUIZ ==================== */}
+      {/* ==================== MODAL: NPC QUEST & COMPLETE QUIZ BLITZ ==================== */}
       {activeModal === 'quest' && activeQuestion && (
-        <div className="fixed inset-0 z-30 bg-slate-950/80 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-30 bg-slate-950/80 flex items-center justify-center p-3 sm:p-4">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="quest-modal-title"
-            className="max-w-2xl w-full max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 p-6 sm:p-7 shadow-xl"
+            className="max-w-2xl w-full max-h-[92vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 p-5 sm:p-7 shadow-xl"
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-blue-600 dark:text-sky-400">
                   {currentZoneInfo.id === 'arena' ? 'BOSS BATTLE · ' : ''}
                   {session.gameMode} · {currentZoneInfo.npcName} · Bobot {activeQuestion.points} Poin
                 </p>
-                <h2 id="quest-modal-title" className="mt-1 text-lg sm:text-xl font-bold">
-                  Misi {activeQuestion.orderIndex + 1} dari {questions.length}
-                </h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <h2 id="quest-modal-title" className="text-lg sm:text-xl font-bold">
+                    Kuis {activeQuestion.orderIndex + 1} dari {questions.length}
+                  </h2>
+                  {feverStatus.isFever && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-600 dark:text-amber-300 text-[11px] font-extrabold font-mono">
+                      {feverStatus.label} · {feverStatus.xpMultiplier}x
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 {!gradeFeedback && (
                   <div
-                    className={`px-3 py-1 rounded-lg font-mono text-xs font-bold inline-flex items-center gap-1.5 ${
-                      questTimer <= 7
+                    className={`px-2.5 py-1 rounded-lg font-mono text-xs font-bold inline-flex items-center gap-1.5 ${
+                      timeFrozen
+                        ? 'bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300'
+                        : questTimer <= 7
                         ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
                         : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
                     }`}
                   >
                     <Timer className="w-3.5 h-3.5" />
-                    Bonus Waktu: {questTimer}d
+                    {timeFrozen ? `Beku ${questTimer}d` : `${questTimer}d`}
                   </div>
                 )}
                 <button
@@ -992,12 +1326,73 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               </div>
             </div>
 
+            {/* Question Progress Dots */}
+            <div className="mt-3 flex items-center gap-1.5" aria-label="Progres Soal Sesi">
+              {questions.map((q) => {
+                const isSolved = progress.completedQuests.includes(q.id);
+                const isCurrent = q.id === activeQuestion.id;
+                return (
+                  <div
+                    key={q.id}
+                    className={`h-2 flex-1 rounded-full transition-colors ${
+                      isCurrent
+                        ? 'bg-blue-600 dark:bg-sky-400'
+                        : isSolved
+                        ? 'bg-emerald-500'
+                        : 'bg-slate-200 dark:bg-slate-800'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+
             {!gradeFeedback && (
-              <div className="mt-3 h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+              <div className="mt-2.5 h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-300 ${questTimer <= 7 ? 'bg-rose-500' : 'bg-amber-500'}`}
-                  style={{ width: `${(questTimer / 25) * 100}%` }}
+                  className={`h-full transition-all duration-300 ${
+                    timeFrozen ? 'bg-cyan-500' : questTimer <= 7 ? 'bg-rose-500' : 'bg-amber-500'
+                  }`}
+                  style={{ width: `${Math.min(100, (questTimer / 25) * 100)}%` }}
                 />
+              </div>
+            )}
+
+            {/* Power-Up Lifelines Bar */}
+            {!gradeFeedback && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="lifeline-5050-btn"
+                  disabled={lifelines.fifty_fifty <= 0 || lifelineBusy || eliminatedOptions.length > 0}
+                  onClick={() => void handleUseFiftyFifty()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300 text-xs font-bold disabled:opacity-45"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  50:50 ({lifelines.fifty_fifty})
+                </button>
+                <button
+                  type="button"
+                  data-testid="lifeline-freeze-btn"
+                  disabled={lifelines.freeze_time <= 0}
+                  onClick={handleUseFreezeTime}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 text-xs font-bold disabled:opacity-45"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  +12d Waktu ({lifelines.freeze_time})
+                </button>
+                <button
+                  type="button"
+                  data-testid="lifeline-shield-btn"
+                  disabled={lifelines.shield_boost <= 0 || shieldHp >= 3}
+                  onClick={handleUseShieldBoost}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold disabled:opacity-45"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  Perisai +1 ({lifelines.shield_boost})
+                </button>
+                <span className="ml-auto hidden sm:inline text-[11px] text-slate-400">
+                  Shortcut: 1–{activeQuestion.options.length} pilih · Enter kirim
+                </span>
               </div>
             )}
 
@@ -1008,13 +1403,17 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
             <div className="mt-4 space-y-2.5">
               {activeQuestion.options.map((opt, idx) => {
                 const letter = String.fromCharCode(65 + idx);
+                const isEliminated = eliminatedOptions.includes(idx);
                 const isSelected = selectedOption === idx;
                 const isRevealedCorrect = gradeFeedback?.correctIndex === idx;
                 const isWrongChoice = gradeFeedback && !gradeFeedback.isCorrect && isSelected;
 
                 let btnStyle =
                   'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800';
-                if (isRevealedCorrect) {
+                if (isEliminated) {
+                  btnStyle =
+                    'border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 text-slate-400 dark:text-slate-600 line-through opacity-45';
+                } else if (isRevealedCorrect) {
                   btnStyle =
                     'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200';
                 } else if (isWrongChoice) {
@@ -1029,9 +1428,9 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                   <button
                     key={idx}
                     type="button"
-                    disabled={Boolean(gradeFeedback) || submitting}
+                    disabled={Boolean(gradeFeedback) || submitting || isEliminated}
                     onClick={() => setSelectedOption(idx)}
-                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium flex items-center gap-3 transition-colors ${btnStyle}`}
+                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium flex items-center gap-3 transition-colors min-h-[48px] ${btnStyle}`}
                   >
                     <span className="w-7 h-7 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center font-mono font-bold text-xs shrink-0">
                       {letter}
@@ -1125,23 +1524,32 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                     {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-blue-600" />}
                     Penjelasan AI Gemini
                   </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {progress.status === 'completed' ? (
                       <button
                         type="button"
                         onClick={() => setActiveModal('victory')}
                         className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold"
                       >
-                        Lihat Hasil Akhir
+                        Lihat Hasil & Ringkasan Kuis
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => setActiveModal('none')}
-                        className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold"
-                      >
-                        Lanjut Jelajahi Dunia
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={openNextPendingQuiz}
+                          className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-extrabold"
+                        >
+                          Soal Berikutnya
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal('none')}
+                          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold"
+                        >
+                          Lanjut Jelajahi Dunia
+                        </button>
+                      </>
                     )}
                   </div>
                 </>
@@ -1269,16 +1677,156 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
         </div>
       )}
 
-      {/* ==================== MODAL: AUDIO SETTINGS ==================== */}
+      {/* ==================== MODAL: SETTINGS (AUDIO + HP/TABLET/DESKTOP CONTROLS + ARENA/SKIN) ==================== */}
       {activeModal === 'settings' && (
         <div className="fixed inset-0 z-30 bg-slate-950/80 flex items-center justify-center p-4">
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Pengaturan Audio Dunia 3D"
-            className="max-w-lg w-full rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 p-6 shadow-xl"
+            aria-label="Pengaturan Game, Audio, Kontrol Perangkat & Arena"
+            className="max-w-2xl w-full max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 p-6 shadow-xl"
           >
-            <AudioSettingsPanel onClose={() => setActiveModal('none')} />
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-200 dark:border-slate-800 mb-4">
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'audio', label: 'Audio & Musik' },
+                  { id: 'controls', label: 'Kontrol HP/Tablet/PC' },
+                  { id: 'appearance', label: 'Arena & Skin 3D' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setSettingsTab(t.id as 'audio' | 'controls' | 'appearance')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-colors ${
+                      settingsTab === t.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                aria-label="Tutup pengaturan"
+                onClick={() => setActiveModal('none')}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {settingsTab === 'audio' && (
+              <AudioSettingsPanel onClose={() => setActiveModal('none')} />
+            )}
+
+            {settingsTab === 'controls' && (
+              <div className="space-y-5">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {deviceProfile === 'phone' ? (
+                      <Smartphone className="w-5 h-5 text-emerald-500" />
+                    ) : deviceProfile === 'tablet' ? (
+                      <Tablet className="w-5 h-5 text-sky-500" />
+                    ) : (
+                      <Monitor className="w-5 h-5 text-blue-600" />
+                    )}
+                    <div>
+                      <p className="text-sm font-bold capitalize">Mode Perangkat: {deviceProfile}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Mendukung Sentuh Layar, Keyboard + Mouse, dan Controller Gamepad.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleTouchPad}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold ${
+                      showTouchPad
+                        ? 'bg-emerald-600 text-white'
+                        : 'border border-slate-300 dark:border-slate-700'
+                    }`}
+                  >
+                    {showTouchPad ? 'Sentuh Aktif' : 'Sentuh Nonaktif'}
+                  </button>
+                </div>
+
+                <div>
+                  <span className="block text-xs font-bold mb-2">Ukuran Tombol Sentuh (HP & Tablet)</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'compact', label: 'Kecil' },
+                      { id: 'normal', label: 'Normal' },
+                      { id: 'large', label: 'Besar' },
+                    ].map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setTouchSize(s.id as TouchControlSize)}
+                        className={`py-2 rounded-xl border text-xs font-bold ${
+                          touchSize === s.id
+                            ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-sky-300'
+                            : 'border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1.5">
+                    <label htmlFor="cam-sens-range">Sensitivitas Putar Kamera</label>
+                    <span className="font-mono">{cameraSensitivity.toFixed(1)}x</span>
+                  </div>
+                  <input
+                    id="cam-sens-range"
+                    type="range"
+                    min={0.5}
+                    max={1.8}
+                    step={0.1}
+                    value={cameraSensitivity}
+                    onChange={(e) => setCameraSensitivity(Number(e.target.value))}
+                    className="w-full accent-blue-600"
+                  />
+                </div>
+
+                <label className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 text-xs font-semibold cursor-pointer">
+                  <span>Kamera Otomatis Mengikuti Arah Jalan (Direkomendasikan di HP/Tablet)</span>
+                  <input
+                    type="checkbox"
+                    checked={autoFollowCamera}
+                    onChange={(e) => setAutoFollowCamera(e.target.checked)}
+                  />
+                </label>
+              </div>
+            )}
+
+            {settingsTab === 'appearance' && (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Arena aktif: <strong className="text-slate-900 dark:text-white">{currentArena.name}</strong> · Karakter:{' '}
+                  <strong className="text-slate-900 dark:text-white">{currentSkin.name}</strong>
+                </p>
+                <ArenaSkinSelector
+                  compact
+                  selectedArenaId={currentArenaId}
+                  onSelectArena={(id) => {
+                    setCurrentArenaId(id);
+                    setToastMsg(`Arena 3D diubah ke ${getArenaTheme(id).name}!`);
+                  }}
+                  selectedSkinId={currentSkinId}
+                  onSelectSkin={(id) => {
+                    setCurrentSkinId(id);
+                    setToastMsg(`Skin karakter diubah ke ${getCharacterSkin(id).name}!`);
+                  }}
+                  avatarColor={currentAvatarColor}
+                  onSelectColor={setCurrentAvatarColor}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1286,7 +1834,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
       {/* ==================== MODAL: PAUSE / VICTORY / DEFEAT ==================== */}
       {(activeModal === 'pause' || activeModal === 'victory' || activeModal === 'defeat') && (
         <div className="fixed inset-0 z-30 bg-slate-950/85 flex items-center justify-center p-4">
-          <div className="max-w-md w-full rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 p-7 text-center">
+          <div className="max-w-md w-full max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 p-6 sm:p-7 text-center">
             {activeModal === 'victory' ? (
               <Award className="w-12 h-12 text-amber-500 mx-auto" />
             ) : activeModal === 'defeat' ? (
@@ -1326,6 +1874,34 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               </div>
             </div>
 
+            {activeModal === 'victory' && answerHistory.length > 0 && (
+              <div className="mt-5 text-left space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Ringkasan Jawaban Kuis
+                </p>
+                <div className="max-h-40 overflow-y-auto space-y-1.5">
+                  {answerHistory.map((item, i) => (
+                    <div
+                      key={item.questionId}
+                      className="rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs flex items-center justify-between gap-2"
+                    >
+                      <span className="inline-flex items-center gap-1.5 truncate">
+                        {item.isCorrect ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                        )}
+                        <span className="truncate">
+                          #{i + 1} {item.prompt}
+                        </span>
+                      </span>
+                      <span className="font-mono font-bold shrink-0">+{item.pointsEarned}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 flex flex-col gap-2.5">
               {activeModal === 'defeat' ? (
                 <button
@@ -1354,15 +1930,29 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                     className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-700 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     <Gamepad2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    Kontrol Sentuh HP: {showTouchPad ? 'Aktif' : 'Nonaktif'}
+                    Kontrol Sentuh HP/Tablet: {showTouchPad ? 'Aktif' : 'Nonaktif'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveModal('settings')}
+                    onClick={() => {
+                      setSettingsTab('appearance');
+                      setActiveModal('settings');
+                    }}
+                    className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-700 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    Ganti Arena 3D & Skin Karakter
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsTab('audio');
+                      setActiveModal('settings');
+                    }}
                     className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-700 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     <Settings className="w-4 h-4 text-blue-600 dark:text-sky-400" />
-                    Pengaturan Volume & Audio
+                    Pengaturan Volume, Audio & Kontrol
                   </button>
                 </>
               )}

@@ -325,3 +325,37 @@ export function resolveHazardHit(params: {
   };
 }
 
+export function pickFiftyFiftyEliminations(
+  optionCount: number,
+  correctIndex: number
+): number[] {
+  if (optionCount <= 2) return [];
+  const wrongIndices: number[] = [];
+  for (let i = 0; i < optionCount; i++) {
+    if (i !== correctIndex) wrongIndices.push(i);
+  }
+  // Eliminate up to 2 wrong choices deterministically/shuffled, leaving at least 2 choices total
+  const maxToRemove = Math.min(2, Math.max(0, optionCount - 2));
+  const shuffled = [...wrongIndices].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, maxToRemove);
+}
+
+export function getQuizFeverStatus(streak: number): {
+  label: string;
+  isFever: boolean;
+  xpMultiplier: number;
+} {
+  const s = Math.max(0, Math.floor(streak));
+  if (s >= 4) {
+    return { label: 'STREAK FEVER MAX', isFever: true, xpMultiplier: 2.0 };
+  }
+  if (s >= 2) {
+    return { label: 'COMBO PANAS', isFever: true, xpMultiplier: 1.5 };
+  }
+  if (s === 1) {
+    return { label: 'KOMBO AWAL', isFever: false, xpMultiplier: 1.25 };
+  }
+  return { label: 'SIAP BERAKSI', isFever: false, xpMultiplier: 1.0 };
+}
+
+

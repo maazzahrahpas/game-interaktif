@@ -5,8 +5,10 @@ import {
   BarChart3,
   BookOpen,
   CheckCircle2,
+  Cloud,
   Copy,
   Download,
+  ExternalLink,
   FileSpreadsheet,
   FileText,
   FileUp,
@@ -16,6 +18,8 @@ import {
   LogOut,
   Moon,
   Plus,
+  RefreshCw,
+  Search,
   Share2,
   ShieldCheck,
   Sparkles,
@@ -25,9 +29,11 @@ import {
 } from 'lucide-react';
 import type {
   AnswerKey,
+  ArenaThemeId,
   AuditLogEntry,
   Classroom,
   DifficultyLevel,
+  DriveDocxFile,
   EduverseUser,
   GameMode,
   GameSession,
@@ -38,20 +44,43 @@ import type {
   StudentQuestion,
   SubmissionRecord,
 } from '../types/eduverse.ts';
-import { extractDocxFile, generateWordTemplateBlob } from '../utils/docxParser.ts';
+import {
+  ARENA_THEMES,
+  DEFAULT_ARENA_ID,
+  getArenaTheme,
+  resolveArenaIdFromSession,
+} from '../game/gameCatalog.ts';
+import {
+  extractDocxArrayBuffer,
+  extractDocxFile,
+  generateWordTemplateBlob,
+} from '../utils/docxParser.ts';
 import { computeSessionAnalytics } from '../utils/gameRules.ts';
 import { exportSessionResultsToExcel, exportSessionResultsToPDF } from '../utils/exportReports.ts';
 import {
   auth,
+  clearDriveAccessToken,
+  connectGoogleDrive,
   fetchTeacherWorkspaceFromFirestore,
+  getDriveAccessToken,
   syncBankToFirestore,
   syncClassToFirestore,
   syncSessionToFirestore,
 } from '../lib/firebase.ts';
+import {
+  DRIVE_GDOC_MIME,
+  GoogleDriveAuthError,
+  downloadDriveDocxArrayBuffer,
+  formatDriveFileSize,
+  getDriveFileMetadata,
+  isDriveUpdateAvailable,
+  listDriveDocxFiles,
+} from '../lib/googleDrive.ts';
 
 interface TeacherDashboardProps {
   user: EduverseUser;
   darkMode: boolean;
+  adminToken?: string | null;
   onToggleTheme: () => void;
   onLaunchSessionWorld: (joinCode: string) => void;
   onLogout: () => void;
@@ -93,6 +122,7 @@ function mergeByKey<T>(primary: T[], secondary: T[], getKey: (item: T) => string
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   user,
   darkMode,
+  adminToken = null,
   onToggleTheme,
   onLaunchSessionWorld,
   onLogout,
@@ -123,6 +153,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [sessClassId, setSessClassId] = useState('');
   const [sessBankId, setSessBankId] = useState('');
   const [sessMode, setSessMode] = useState<GameMode>('Quiz Adventure');
+  const [sessArenaId, setSessArenaId] = useState<ArenaThemeId>(DEFAULT_ARENA_ID);
   const [sessDifficulty, setSessDifficulty] = useState<DifficultyLevel>('Sedang');
   const [sessDuration, setSessDuration] = useState(40);
   const [sessAttempts, setSessAttempts] = useState(3);
@@ -132,6 +163,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     () => new Date(Date.now() + 72 * 3600 * 1000).toISOString().slice(0, 16)
   );
   const [creatingSession, setCreatingSession] = useState(false);
+
+  // Admin Password Security Panel State
+  const [adminStatus, setAdminStatus] = useState<{
+    configured: boolean;
+    needsSetup: boolean;
+    source: string;
+  } | null>(null);
+  const [curAdminPass, setCurAdminPass] = useState('');
+  const [newAdminPass, setNewAdminPass] = useState('');
+  const [changingPass, setChangingPass] = useState(false);
 
   // DOCX Import & Preview State
   const [bankTitle, setBankTitle] = useState('');
@@ -143,6 +184,21 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [parsingWord, setParsingWord] = useState(false);
   const [savingBank, setSavingBank] = useState(false);
+
+  // Google Drive DOCX Sync State (OAuth access token kept strictly in memory)
+  const [driveToken, setDriveToken] = useState<string | null>(() => getDriveAccessToken());
+  const [driveEmail, setDriveEmail] = useState<string | null>(() => auth.currentUser?.email || null);
+  const [driveFiles, setDriveFiles] = useState<DriveDocxFile[]>([]);
+  const [driveSearch, setDriveSearch] = useState('');
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [driveConnecting, setDriveConnecting] = useState(false);
+  const [driveSyncingFileId, setDriveSyncingFileId] = useState<string | null>(null);
+  const [pendingDriveMeta, setPendingDriveMeta] = useState<{
+    driveFileId: string;
+    driveFileName: string;
+    driveModifiedTime?: string;
+    targetBankId?: string;
+  } | null>(null);
 
   // Gemini AI Teacher Tools
   const [aiTopicInput, setAiTopicInput] = useState('Fotosintesis & Kloroplas');
@@ -185,11 +241,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         data.classes || [],
         (c) => c.id
       );
+      const serverBanksById = new Map((data.questionBanks || []).map((b) => [b.id, b]));
       const mergedBanks = mergeByKey(
         firestoreWorkspace?.questionBanks || [],
         data.questionBanks || [],
         (b) => b.id
-      );
+      ).map((bank) => {
+        const srv = serverBanksById.get(bank.id);
+        return srv?.driveFileId
+          ? {
+              ...bank,
+              driveFileId: bank.driveFileId || srv.driveFileId,
+              driveFileName: bank.driveFileName || srv.driveFileName,
+              driveModifiedTime: bank.driveModifiedTime || srv.driveModifiedTime,
+              lastSyncedAt: bank.lastSyncedAt || srv.lastSyncedAt,
+            }
+          : bank;
+      });
       const mergedQuestions = mergeByKey(
         firestoreWorkspace?.questions || [],
         data.questions || [],
@@ -237,6 +305,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  useEffect(() => {
+    if (activeTab !== 'security') return;
+    fetch('/api/admin/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ok) {
+          setAdminStatus({
+            configured: Boolean(data.configured),
+            needsSetup: Boolean(data.needsSetup),
+            source: String(data.source || 'stored'),
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, [activeTab]);
 
   // Real-time WebSocket monitor for selected session
   useEffect(() => {
@@ -344,6 +428,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           bankId: sessBankId,
           title: sessTitle.trim(),
           gameMode: sessMode,
+          arenaId: sessArenaId,
           difficulty: sessDifficulty,
           durationMinutes: sessDuration,
           maxAttempts: sessAttempts,
@@ -423,6 +508,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
     setParsingWord(true);
     setErrorMsg(null);
+    setPendingDriveMeta(null);
     try {
       const parsed = await extractDocxFile(file);
       setPreviewQuestions(parsed.questions);
@@ -436,6 +522,137 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     } finally {
       setParsingWord(false);
       e.target.value = '';
+    }
+  };
+
+  const handleLoadDriveFiles = useCallback(
+    async (tokenOverride?: string, queryOverride?: string) => {
+      const activeToken = tokenOverride ?? driveToken;
+      if (!activeToken) return;
+      setDriveLoading(true);
+      setErrorMsg(null);
+      try {
+        const files = await listDriveDocxFiles(activeToken, queryOverride ?? driveSearch);
+        setDriveFiles(files);
+      } catch (err) {
+        if (err instanceof GoogleDriveAuthError) {
+          clearDriveAccessToken();
+          setDriveToken(null);
+          setDriveFiles([]);
+          setErrorMsg(err.message);
+        } else {
+          setErrorMsg(err instanceof Error ? err.message : 'Gagal mengambil daftar dokumen dari Google Drive.');
+        }
+      } finally {
+        setDriveLoading(false);
+      }
+    },
+    [driveToken, driveSearch]
+  );
+
+  const handleConnectGoogleDrive = async (): Promise<string | null> => {
+    setDriveConnecting(true);
+    setErrorMsg(null);
+    try {
+      const result = await connectGoogleDrive();
+      setDriveToken(result.accessToken);
+      setDriveEmail(result.email || result.user.email || null);
+      showNotice('Google Drive berhasil terhubung. Memuat dokumen .docx & Google Docs...');
+      await handleLoadDriveFiles(result.accessToken, driveSearch);
+      return result.accessToken;
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      if (raw.includes('popup-closed-by-user') || raw.includes('cancelled-popup-request')) {
+        setErrorMsg('Koneksi Google Drive dibatalkan.');
+      } else if (raw.includes('popup-blocked')) {
+        setErrorMsg('Popup Google diblokir browser. Izinkan popup agar dapat menghubungkan Google Drive.');
+      } else {
+        setErrorMsg(`Gagal menghubungkan Google Drive: ${raw}`);
+      }
+      return null;
+    } finally {
+      setDriveConnecting(false);
+    }
+  };
+
+  const handleLoadDriveFileToPreview = async (
+    file: DriveDocxFile,
+    targetExistingBank?: QuestionBank
+  ) => {
+    let activeToken = driveToken;
+    if (!activeToken) {
+      activeToken = await handleConnectGoogleDrive();
+      if (!activeToken) return;
+    }
+
+    setDriveSyncingFileId(file.id);
+    setErrorMsg(null);
+    try {
+      const buffer = await downloadDriveDocxArrayBuffer(activeToken, file);
+      const parsed = await extractDocxArrayBuffer(buffer);
+
+      const linkedBank =
+        targetExistingBank || banks.find((b) => b.driveFileId && b.driveFileId === file.id);
+
+      setPreviewQuestions(parsed.questions);
+      setParseWarnings(parsed.warnings);
+      setPendingDriveMeta({
+        driveFileId: file.id,
+        driveFileName: file.name,
+        driveModifiedTime: file.modifiedTime,
+        targetBankId: linkedBank?.id,
+      });
+
+      if (linkedBank) {
+        setBankTitle(linkedBank.title);
+        setBankSubject(linkedBank.subject);
+        setBankTopic(linkedBank.topic);
+        setBankGrade(linkedBank.grade);
+        setBankDifficulty(linkedBank.difficulty);
+      } else {
+        setBankTitle(file.name.replace(/\.docx$/i, '').trim() || 'Bank Soal Google Drive');
+      }
+
+      showNotice(
+        linkedBank
+          ? `File "${file.name}" dimuat (${parsed.questions.length} soal). Tinjau perubahan lalu klik Perbarui Bank Tersinkron.`
+          : `Berhasil memuat ${parsed.questions.length} soal dari Google Drive "${file.name}". Tinjau sebelum menyimpan.`
+      );
+    } catch (err) {
+      if (err instanceof GoogleDriveAuthError) {
+        clearDriveAccessToken();
+        setDriveToken(null);
+      }
+      setErrorMsg(err instanceof Error ? err.message : `Gagal membaca file "${file.name}" dari Google Drive.`);
+    } finally {
+      setDriveSyncingFileId(null);
+    }
+  };
+
+  const handleResyncLinkedBankFromDrive = async (bank: QuestionBank) => {
+    if (!bank.driveFileId) return;
+    let activeToken = driveToken;
+    if (!activeToken) {
+      activeToken = await handleConnectGoogleDrive();
+      if (!activeToken) return;
+    }
+    setDriveSyncingFileId(bank.driveFileId);
+    setErrorMsg(null);
+    try {
+      const remoteMeta = await getDriveFileMetadata(activeToken, bank.driveFileId);
+      setDriveFiles((prev) => {
+        const filtered = prev.filter((f) => f.id !== remoteMeta.id);
+        return [remoteMeta, ...filtered];
+      });
+      await handleLoadDriveFileToPreview(remoteMeta, bank);
+    } catch (err) {
+      if (err instanceof GoogleDriveAuthError) {
+        clearDriveAccessToken();
+        setDriveToken(null);
+      }
+      setErrorMsg(err instanceof Error ? err.message : 'Gagal menyinkronkan file dari Google Drive.');
+    } finally {
+      setDriveSyncingFileId(null);
     }
   };
 
@@ -608,8 +825,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setSavingBank(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/teacher/banks', {
-        method: 'POST',
+      const isSyncingExistingBank = Boolean(pendingDriveMeta?.targetBankId);
+      const endpoint = isSyncingExistingBank
+        ? `/api/teacher/banks/${encodeURIComponent(pendingDriveMeta!.targetBankId!)}/sync`
+        : '/api/teacher/banks';
+      const method = isSyncingExistingBank ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           teacherId: user.uid,
@@ -618,6 +841,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           grade: bankGrade,
           topic: cleanTopic,
           difficulty: bankDifficulty,
+          ...(pendingDriveMeta
+            ? {
+                driveFileId: pendingDriveMeta.driveFileId,
+                driveFileName: pendingDriveMeta.driveFileName,
+                driveModifiedTime: pendingDriveMeta.driveModifiedTime,
+                lastSyncedAt: new Date().toISOString(),
+              }
+            : {}),
+          ...(isSyncingExistingBank
+            ? { bankSnapshot: banks.find((b) => b.id === pendingDriveMeta?.targetBankId) }
+            : {}),
           items: sanitizedItems,
         }),
       });
@@ -638,14 +872,44 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       await syncBankToFirestore(data.bank, data.questions, data.answerKeys).catch((err) => {
         console.warn('Sinkronisasi Firestore bank soal dilewati/gagal:', err);
       });
-      setBanks((prev) => [data.bank, ...prev]);
-      setQuestions((prev) => [...prev, ...data.questions]);
-      setAnswerKeys((prev) => [...prev, ...data.answerKeys]);
+
+      if (isSyncingExistingBank) {
+        setBanks((prev) => prev.map((b) => (b.id === data.bank.id ? data.bank : b)));
+        setQuestions((prev) => [
+          ...prev.filter((q) => q.bankId !== data.bank.id),
+          ...data.questions,
+        ]);
+        setAnswerKeys((prev) => [
+          ...prev.filter((k) => k.bankId !== data.bank.id),
+          ...data.answerKeys,
+        ]);
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.bankId === data.bank.id && s.status !== 'ended'
+              ? {
+                  ...s,
+                  questionCount: data.questions.length,
+                  totalPoints: data.questions.reduce((acc, q) => acc + q.points, 0),
+                }
+              : s
+          )
+        );
+      } else {
+        setBanks((prev) => [data.bank, ...prev]);
+        setQuestions((prev) => [...prev, ...data.questions]);
+        setAnswerKeys((prev) => [...prev, ...data.answerKeys]);
+      }
+
       setSessBankId(data.bank.id);
       setPreviewQuestions([]);
       setParseWarnings([]);
+      setPendingDriveMeta(null);
       setBankTitle('');
-      showNotice(`Bank soal "${data.bank.title}" (${data.questions.length} soal) tersimpan dengan kunci jawaban terisolasi!`);
+      showNotice(
+        isSyncingExistingBank
+          ? `Bank soal "${data.bank.title}" (${data.questions.length} soal) berhasil disinkronkan dari Google Drive!`
+          : `Bank soal "${data.bank.title}" (${data.questions.length} soal) tersimpan dengan kunci jawaban terisolasi!`
+      );
     } catch (err) {
       const detail = err instanceof Error && err.message ? ` (${err.message})` : '';
       setErrorMsg(`Gagal terhubung ke server saat menyimpan bank soal${detail}.`);
@@ -891,7 +1155,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       >
                         <div>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {s.subject} · Kelas {s.grade} · {s.gameMode} · Kode{' '}
+                            {s.subject} · Kelas {s.grade} · {s.gameMode} ·{' '}
+                            {getArenaTheme(resolveArenaIdFromSession(s)).name} · Kode{' '}
                             <span className="font-mono font-bold text-blue-600 dark:text-sky-400">
                               {s.joinCode}
                             </span>
@@ -1057,6 +1322,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           {GAME_MODES.map((m) => (
                             <option key={m} value={m}>
                               {m}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label htmlFor="sess-arena" className="block text-xs font-semibold mb-1">
+                          Arena Dunia 3D
+                        </label>
+                        <select
+                          id="sess-arena"
+                          value={sessArenaId}
+                          onChange={(e) => setSessArenaId(e.target.value as ArenaThemeId)}
+                          className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
+                        >
+                          {ARENA_THEMES.map((arena) => (
+                            <option key={arena.id} value={arena.id}>
+                              {arena.name} ({arena.hazardSpeedMultiplier}x)
                             </option>
                           ))}
                         </select>
@@ -1318,9 +1600,221 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </div>
                 </div>
 
+                {/* Google Drive DOCX Sync Panel */}
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+                        <Cloud className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-extrabold">Sinkronisasi Langsung dari Google Drive</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Telusuri file Microsoft Word (.docx) atau Google Docs di Google Drive Anda, lalu muat ke pratinjau atau sinkronkan ulang kapan saja saat soal diperbarui.
+                        </p>
+                      </div>
+                    </div>
+
+                    {!driveToken ? (
+                      <button
+                        type="button"
+                        data-testid="connect-google-drive-btn"
+                        disabled={driveConnecting}
+                        onClick={() => void handleConnectGoogleDrive()}
+                        className="inline-flex items-center gap-3 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs font-bold shadow-xs disabled:opacity-60"
+                      >
+                        {driveConnecting ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                        ) : (
+                          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                            <path
+                              fill="#EA4335"
+                              d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+                            />
+                            <path
+                              fill="#4285F4"
+                              d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+                            />
+                            <path
+                              fill="#FBBC05"
+                              d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+                            />
+                            <path
+                              fill="#34A853"
+                              d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+                            />
+                          </svg>
+                        )}
+                        <span>Sign in with Google · Hubungkan Google Drive</span>
+                      </button>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-3 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+                          Terhubung{driveEmail ? ` (${driveEmail})` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={driveLoading}
+                          onClick={() => void handleLoadDriveFiles()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${driveLoading ? 'animate-spin' : ''}`} />
+                          Muat Ulang
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {driveToken && (
+                    <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void handleLoadDriveFiles(driveToken, driveSearch);
+                        }}
+                        className="flex flex-col sm:flex-row gap-2"
+                      >
+                        <div className="relative flex-1">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={driveSearch}
+                            onChange={(e) => setDriveSearch(e.target.value)}
+                            placeholder="Cari nama file .docx atau Google Docs di Drive..."
+                            className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 pl-9 pr-3 py-2 text-xs"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={driveLoading}
+                          className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-60"
+                        >
+                          Cari di Drive
+                        </button>
+                      </form>
+
+                      {driveLoading ? (
+                        <div className="py-8 flex items-center justify-center gap-2 text-xs text-slate-500">
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                          Mengambil daftar file dari Google Drive...
+                        </div>
+                      ) : driveFiles.length === 0 ? (
+                        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-5 text-center text-xs text-slate-500">
+                          Tidak ditemukan file <span className="font-mono">.docx</span> atau Google Docs dengan kata kunci tersebut.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
+                          {driveFiles.map((file) => {
+                            const linkedBank = banks.find((b) => b.driveFileId === file.id);
+                            const hasRemoteUpdate =
+                              linkedBank &&
+                              isDriveUpdateAvailable(linkedBank.driveModifiedTime, file.modifiedTime);
+                            const isBusy = driveSyncingFileId === file.id;
+
+                            return (
+                              <div
+                                key={file.id}
+                                className={`rounded-xl border p-3.5 flex flex-col justify-between gap-2.5 ${
+                                  hasRemoteUpdate
+                                    ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20'
+                                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-bold truncate" title={file.name}>
+                                      {file.name}
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      {file.mimeType === DRIVE_GDOC_MIME ? 'Google Docs (Auto Export DOCX)' : 'Word .docx'} ·{' '}
+                                      {formatDriveFileSize(file.size)}
+                                      {file.modifiedTime &&
+                                        ` · Diubah ${new Date(file.modifiedTime).toLocaleDateString('id-ID')}`}
+                                    </p>
+                                  </div>
+                                  {file.webViewLink && (
+                                    <a
+                                      href={file.webViewLink}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      aria-label={`Buka ${file.name} di Google Drive`}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  {linkedBank ? (
+                                    <span
+                                      className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                                        hasRemoteUpdate
+                                          ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                                          : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                                      }`}
+                                    >
+                                      {hasRemoteUpdate
+                                        ? 'Ada Pembaruan di Drive'
+                                        : `Tersinkron: ${linkedBank.title}`}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-500">Siap diimpor</span>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    disabled={isBusy}
+                                    onClick={() => void handleLoadDriveFileToPreview(file, linkedBank)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-60"
+                                  >
+                                    {isBusy ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    )}
+                                    {linkedBank ? 'Sinkronkan ke Pratinjau' : 'Muat ke Pratinjau'}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Mandatory Teacher Preview & Edit Stage */}
                 {previewQuestions.length > 0 && (
                   <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-5">
+                    {pendingDriveMeta && (
+                      <div className="rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2 text-sky-900 dark:text-sky-200">
+                          <Cloud className="w-4 h-4 shrink-0" />
+                          <span>
+                            Sumber Google Drive: <strong>{pendingDriveMeta.driveFileName}</strong>
+                            {pendingDriveMeta.targetBankId
+                              ? ' (Mode: Memperbarui bank soal tersinkron)'
+                              : ' (Mode: Simpan bank soal baru terhubung ke Drive)'}
+                          </span>
+                        </div>
+                        {pendingDriveMeta.targetBankId && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPendingDriveMeta((prev) =>
+                                prev ? { ...prev, targetBankId: undefined } : prev
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg border border-sky-400 dark:border-sky-700 font-bold text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900"
+                          >
+                            Simpan sebagai Bank Baru
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div>
                         <h2 className="text-lg font-bold">
@@ -1346,7 +1840,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50"
                         >
                           {savingBank && <Loader2 className="w-4 h-4 animate-spin" />}
-                          Setujui & Simpan ke Bank Soal
+                          {pendingDriveMeta?.targetBankId
+                            ? 'Setujui & Perbarui Bank Tersinkron'
+                            : 'Setujui & Simpan ke Bank Soal'}
                         </button>
                       </div>
                     </div>
@@ -1549,20 +2045,54 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
                   <h2 className="text-lg font-bold">Bank Soal Tersimpan ({banks.length})</h2>
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {banks.map((b) => (
-                      <div
-                        key={b.id}
-                        className="rounded-xl border border-slate-200 dark:border-slate-800 p-4"
-                      >
-                        <p className="text-xs text-slate-500">
-                          {b.subject} · Kelas {b.grade} · {b.questionCount} soal
-                        </p>
-                        <p className="mt-1 font-bold">{b.title}</p>
-                        <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
-                          Kunci jawaban tersimpan terpisah ({answerKeys.filter((k) => k.bankId === b.id).length} kunci)
-                        </p>
-                      </div>
-                    ))}
+                    {banks.map((b) => {
+                      const isSyncing = Boolean(b.driveFileId && driveSyncingFileId === b.driveFileId);
+                      return (
+                        <div
+                          key={b.id}
+                          className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col justify-between gap-3"
+                        >
+                          <div>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs text-slate-500">
+                                {b.subject} · Kelas {b.grade} · {b.questionCount} soal
+                              </p>
+                              {b.driveFileId && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 text-[11px] font-bold">
+                                  <Cloud className="w-3 h-3" />
+                                  Google Drive
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 font-bold">{b.title}</p>
+                            <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                              Kunci jawaban tersimpan terpisah ({answerKeys.filter((k) => k.bankId === b.id).length} kunci)
+                            </p>
+                            {b.driveFileId && (
+                              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                Sumber: {b.driveFileName || b.driveFileId}
+                                {b.lastSyncedAt &&
+                                  ` · Sinkron terakhir ${new Date(b.lastSyncedAt).toLocaleString('id-ID')}`}
+                              </p>
+                            )}
+                          </div>
+
+                          {b.driveFileId && (
+                            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                              <button
+                                type="button"
+                                disabled={isSyncing}
+                                onClick={() => void handleResyncLinkedBankFromDrive(b)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold disabled:opacity-60"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                                {isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Ulang dari Drive'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1707,19 +2237,118 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
                   <h1 className="text-xl font-extrabold flex items-center gap-2">
                     <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                    Arsitektur Keamanan & Audit Log
+                    Arsitektur Keamanan & Password Admin Website
                   </h1>
                   <ul className="mt-4 space-y-2 text-sm text-slate-600 dark:text-slate-300 list-disc pl-5">
                     <li>
                       <strong>Pemisahan Kunci Jawaban:</strong> Koleksi <code className="font-mono">answerKeys</code> diblokir oleh Firestore Security Rules bagi siswa dan tidak pernah dikirim ke browser siswa sebelum penilaian di backend.
                     </li>
                     <li>
-                      <strong>Proteksi Role:</strong> Pengguna tidak dapat mengubah role miliknya sendiri; validasi dilakukan melalui aturan <code className="font-mono">firestore.rules</code> dan verifikasi backend.
+                      <strong>Proteksi Role & Admin Password:</strong> Login Admin Website diverifikasi di server menggunakan hash <code className="font-mono">scrypt</code> + token sesi bertanda tangan HMAC-SHA256.
                     </li>
                     <li>
                       <strong>PII Isolation:</strong> Email dan nomor identitas tersimpan pada subkoleksi terisolasi <code className="font-mono">users/{'{uid}'}/private/info</code>.
                     </li>
                   </ul>
+
+                  <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-bold">Status Password Admin Website</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {adminStatus?.source === 'env'
+                            ? 'Aktif melalui Environment Variable server (ADMIN_PASSWORD).'
+                            : adminStatus?.configured
+                            ? 'Aktif & tersimpan aman dalam bentuk hash scrypt di database server.'
+                            : 'Belum diaktifkan.'}
+                        </p>
+                      </div>
+                      <span
+                        className={`text-xs font-bold px-2.5 py-1 rounded-lg ${
+                          adminStatus?.configured
+                            ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {adminStatus?.configured ? 'Terlindungi' : 'Perlu Aktivasi'}
+                      </span>
+                    </div>
+
+                    {adminToken && adminStatus?.source !== 'env' && (
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (newAdminPass.length < 6) {
+                            setErrorMsg('Password baru minimal 6 karakter.');
+                            return;
+                          }
+                          setChangingPass(true);
+                          setErrorMsg(null);
+                          try {
+                            const res = await fetch('/api/admin/change-password', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${adminToken}`,
+                              },
+                              body: JSON.stringify({
+                                currentPassword: curAdminPass,
+                                newPassword: newAdminPass,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok || !data.ok) {
+                              setErrorMsg(data?.error || 'Gagal mengganti password admin.');
+                              return;
+                            }
+                            setCurAdminPass('');
+                            setNewAdminPass('');
+                            showNotice('Password Admin Website berhasil diperbarui.');
+                          } catch {
+                            setErrorMsg('Gagal menghubungi server.');
+                          } finally {
+                            setChangingPass(false);
+                          }
+                        }}
+                        className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end"
+                      >
+                        <div>
+                          <label htmlFor="cur-admin-pass" className="block text-xs font-semibold mb-1">
+                            Password Saat Ini
+                          </label>
+                          <input
+                            id="cur-admin-pass"
+                            type="password"
+                            required
+                            value={curAdminPass}
+                            onChange={(e) => setCurAdminPass(e.target.value)}
+                            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="new-admin-pass" className="block text-xs font-semibold mb-1">
+                            Password Baru (min. 6)
+                          </label>
+                          <input
+                            id="new-admin-pass"
+                            type="password"
+                            required
+                            minLength={6}
+                            value={newAdminPass}
+                            onChange={(e) => setNewAdminPass(e.target.value)}
+                            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={changingPass}
+                          className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-60"
+                        >
+                          {changingPass ? 'Menyimpan...' : 'Perbarui Password Admin'}
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">

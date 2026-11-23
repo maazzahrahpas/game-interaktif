@@ -57,6 +57,7 @@ async function startServer() {
           const displayName = String(msg.displayName || 'Penjelajah').slice(0, 60);
           const role = msg.role === 'guru' || msg.role === 'super_admin' ? msg.role : 'siswa';
           const avatarColor = String(msg.avatarColor || '#3B82F6');
+          const skinId = typeof msg.skinId === 'string' ? msg.skinId : undefined;
 
           const playerState: PlayerAvatarState | undefined =
             role === 'siswa'
@@ -66,6 +67,7 @@ async function startServer() {
                   studentId,
                   displayName,
                   avatarColor,
+                  ...(skinId ? { skinId: skinId as PlayerAvatarState['skinId'] } : {}),
                   x: Number(msg.x ?? 0),
                   y: Number(msg.y ?? 0),
                   z: Number(msg.z ?? 18),

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   computePinchZoomDistance,
   computeVirtualJoystickVector,
+  getDeviceProfile,
+  getTouchControlScaleValue,
   shouldAutoEnableTouchControls,
 } from './touchControls.ts';
 
@@ -37,13 +39,22 @@ test('shouldAutoEnableTouchControls detects smartphones and tablets accurately',
     true
   );
   assert.equal(
-    shouldAutoEnableTouchControls({ hasCoarsePointer: false, maxTouchPoints: 5, viewportWidth: 1024 }),
+    shouldAutoEnableTouchControls({ hasCoarsePointer: false, maxTouchPoints: 5, viewportWidth: 1280 }),
     true
   );
   assert.equal(
     shouldAutoEnableTouchControls({ hasCoarsePointer: false, maxTouchPoints: 0, viewportWidth: 1440 }),
     false
   );
+});
+
+test('getDeviceProfile and getTouchControlScaleValue distinguish phone, tablet, and desktop', () => {
+  assert.equal(getDeviceProfile({ hasCoarsePointer: true, maxTouchPoints: 5, viewportWidth: 390 }), 'phone');
+  assert.equal(getDeviceProfile({ hasCoarsePointer: true, maxTouchPoints: 5, viewportWidth: 1024 }), 'tablet');
+  assert.equal(getDeviceProfile({ hasCoarsePointer: false, maxTouchPoints: 0, viewportWidth: 1440 }), 'desktop');
+
+  assert.ok(getTouchControlScaleValue('compact', 'phone') < getTouchControlScaleValue('normal', 'phone'));
+  assert.ok(getTouchControlScaleValue('large', 'tablet') > getTouchControlScaleValue('normal', 'tablet'));
 });
 
 test('computePinchZoomDistance clamps distance between min and max bounds', () => {

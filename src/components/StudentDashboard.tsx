@@ -1,8 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Compass, Gamepad2, Loader2, LogOut, Moon, Settings, Sun, Trophy } from 'lucide-react';
+import { Award, Compass, Gamepad2, Loader2, LogOut, Moon, Settings, Sparkles, Sun, Trophy } from 'lucide-react';
+import {
+  DEFAULT_ARENA_ID,
+  DEFAULT_SKIN_ID,
+  resolveArenaIdFromSession,
+  getArenaTheme,
+  getCharacterSkin,
+} from '../game/gameCatalog.ts';
+import { ArenaSkinSelector } from './ArenaSkinSelector.tsx';
 import { AudioSettingsPanel } from './AudioSettingsPanel.tsx';
 import type {
   AchievementBadge,
+  ArenaThemeId,
+  CharacterSkinId,
   EduverseUser,
   GameSession,
   StudentProgress,
@@ -16,6 +26,12 @@ interface StudentDashboardProps {
   onToggleTheme: () => void;
   onJoinSessionCode: (code: string) => void;
   onLogout: () => void;
+  selectedArenaId?: ArenaThemeId;
+  onChangeArenaId?: (arenaId: ArenaThemeId) => void;
+  selectedSkinId?: CharacterSkinId;
+  onChangeSkinId?: (skinId: CharacterSkinId) => void;
+  avatarColor?: string;
+  onChangeAvatarColor?: (hex: string) => void;
 }
 
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({
@@ -24,6 +40,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onToggleTheme,
   onJoinSessionCode,
   onLogout,
+  selectedArenaId = DEFAULT_ARENA_ID,
+  onChangeArenaId,
+  selectedSkinId = DEFAULT_SKIN_ID,
+  onChangeSkinId,
+  avatarColor = '#2563EB',
+  onChangeAvatarColor,
 }) => {
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<GameSession[]>([]);
@@ -162,6 +184,32 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </form>
         </section>
 
+        {/* Avatar Skin & Arena Customizer */}
+        {onChangeArenaId && onChangeSkinId && onChangeAvatarColor && (
+          <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  Kustomisasi Skin Karakter & Arena Favorit
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Karakter aktif: {getCharacterSkin(selectedSkinId).name} · Arena pilihan: {getArenaTheme(selectedArenaId).name}
+                </p>
+              </div>
+            </div>
+            <ArenaSkinSelector
+              compact
+              selectedArenaId={selectedArenaId}
+              onSelectArena={onChangeArenaId}
+              selectedSkinId={selectedSkinId}
+              onSelectSkin={onChangeSkinId}
+              avatarColor={avatarColor}
+              onSelectColor={onChangeAvatarColor}
+            />
+          </section>
+        )}
+
         {loading ? (
           <div className="py-12 flex justify-center">
             <Loader2 className="w-7 h-7 animate-spin text-blue-600" />
@@ -177,27 +225,31 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <div className="mt-4 space-y-3">
                 {sessions
                   .filter((s) => s.status === 'active' && s.isLinkActive)
-                  .map((s) => (
-                    <div
-                      key={s.id}
-                      className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between gap-4"
-                    >
-                      <div>
-                        <p className="text-xs text-slate-500">
-                          {s.subject} · Kelas {s.grade} · Kode <span className="font-mono font-bold">{s.joinCode}</span>
-                        </p>
-                        <p className="font-bold text-sm mt-0.5">{s.title}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onJoinSessionCode(s.joinCode)}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shrink-0"
+                  .map((s) => {
+                    const sessionArena = getArenaTheme(resolveArenaIdFromSession(s));
+                    return (
+                      <div
+                        key={s.id}
+                        className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between gap-4"
                       >
-                        <Gamepad2 className="w-4 h-4" />
-                        Mainkan
-                      </button>
-                    </div>
-                  ))}
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            {s.subject} · Kelas {s.grade} · {sessionArena.name} · Kode{' '}
+                            <span className="font-mono font-bold">{s.joinCode}</span>
+                          </p>
+                          <p className="font-bold text-sm mt-0.5">{s.title}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onJoinSessionCode(s.joinCode)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shrink-0"
+                        >
+                          <Gamepad2 className="w-4 h-4" />
+                          Mainkan
+                        </button>
+                      </div>
+                    );
+                  })}
               </div>
             </section>
 

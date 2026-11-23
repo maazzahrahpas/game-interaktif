@@ -1,12 +1,11 @@
 {
-  "projectId": "hidef-glow-vmbw7",
-  "appId": "1:434581534380:web:610c6cae6de76c31789109",
-  "apiKey": "AIzaSyCqWBeM6WH6yRu1IcD-bO9FUhaweE7tB7s",
-  "authDomain": "hidef-glow-vmbw7.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-c0597574-e066-451c-b24c-36af24f4c03a",
-  "storageBucket": "hidef-glow-vmbw7.firebasestorage.app",
-  "messagingSenderId": "434581534380",
+  "projectId": "gen-lang-client-0996152906",
+  "appId": "1:697317172458:web:4930f7db58e1b55f8e6393",
+  "apiKey": "AIzaSyDXYvknrhVeoTosOZgSb_gq4TKsKv4LJ08",
+  "authDomain": "gen-lang-client-0996152906.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0996152906.firebasestorage.app",
+  "messagingSenderId": "697317172458",
   "measurementId": "",
-  "oAuthClientId": "434581534380-t6n2gl1lk71bfda8olisdm4nn1pr7e36.apps.googleusercontent.com",
+  "oAuthClientId": "697317172458-5nvn6hk7p3v777c07bls2r4o1pfro5da.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

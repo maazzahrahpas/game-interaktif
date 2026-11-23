@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {
   AchievementBadge,
   AnswerKey,
+  ArenaThemeId,
   AuditLogEntry,
   Classroom,
   GameSession,
@@ -16,14 +17,26 @@ import type {
   WorldZoneId,
 } from '../types/eduverse.ts';
 import {
+  arenaIdToWorldId,
+  DEFAULT_ARENA_ID,
+  resolveArenaIdFromSession,
+} from '../game/gameCatalog.ts';
+import {
   calculateLevelFromXp,
   calculateQuestionReward,
   calculateAccuracyPercent,
   evaluateUnlockedBadges,
   getUnlockedZonesForProgress,
+  pickFiftyFiftyEliminations,
   sortLeaderboard,
   validateSessionAccess,
 } from '../utils/gameRules.ts';
+import {
+  hashAdminPassword,
+  verifyPlainPasswordTimingSafe,
+  verifyScryptPassword,
+  type StoredAdminCredential,
+} from './adminAuth.ts';
 
 function resolveDataFilePath(): string {
   const isServerless =
@@ -51,6 +64,7 @@ export interface ServerDatabase {
   leaderboard: Record<string, LeaderboardEntry>;
   achievements: Record<string, AchievementBadge>;
   auditLogs: AuditLogEntry[];
+  adminCredential?: StoredAdminCredential;
 }
 
 function createSeedDatabase(): ServerDatabase {
@@ -296,6 +310,7 @@ function createSeedDatabase(): ServerDatabase {
       difficulty: 'Sedang',
       gameMode: 'Quiz Adventure',
       worldId: 'world_eduverse_utama',
+      arenaId: 'akademi_langit',
       durationMinutes: 45,
       maxAttempts: 3,
       questionCount: 6,
@@ -320,7 +335,8 @@ function createSeedDatabase(): ServerDatabase {
       topic: 'Mekanika & Energi',
       difficulty: 'Sedang',
       gameMode: 'Boss Battle',
-      worldId: 'world_eduverse_utama',
+      worldId: 'arena_cyber_lab',
+      arenaId: 'cyber_lab',
       durationMinutes: 40,
       maxAttempts: 3,
       questionCount: 6,
@@ -762,6 +778,10 @@ class EduverseServerStore {
     grade: QuestionBank['grade'];
     topic?: string;
     difficulty?: QuestionBank['difficulty'];
+    driveFileId?: string;
+    driveFileName?: string;
+    driveModifiedTime?: string;
+    lastSyncedAt?: string;
     items: Array<{
       prompt: string;
       options: string[];
@@ -833,6 +853,10 @@ class EduverseServerStore {
       topic: cleanTopic,
       difficulty: cleanDifficulty,
       questionCount: normalizedItems.length,
+      ...(input.driveFileId ? { driveFileId: String(input.driveFileId).slice(0, 200) } : {}),
+      ...(input.driveFileName ? { driveFileName: String(input.driveFileName).slice(0, 200) } : {}),
+      ...(input.driveModifiedTime ? { driveModifiedTime: String(input.driveModifiedTime).slice(0, 64) } : {}),
+      ...(input.driveFileId ? { lastSyncedAt: input.lastSyncedAt || nowIso } : {}),
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -877,13 +901,186 @@ class EduverseServerStore {
     this.logAudit(
       bank.teacherId,
       'guru',
-      'IMPORT_QUESTION_BANK',
+      bank.driveFileId ? 'SYNC_DRIVE_IMPORT_BANK' : 'IMPORT_QUESTION_BANK',
       'questionBank',
       bankId,
-      `Menyimpan bank soal "${bank.title}" (${savedQuestions.length} soal terverifikasi guru)`
+      bank.driveFileId
+        ? `Mengimpor bank soal "${bank.title}" langsung dari Google Drive "${bank.driveFileName || bank.driveFileId}" (${savedQuestions.length} soal)`
+        : `Menyimpan bank soal "${bank.title}" (${savedQuestions.length} soal terverifikasi guru)`
     );
     this.persist();
     return { bank, questions: savedQuestions, answerKeys: savedKeys };
+  }
+
+  public syncQuestionBankFromDrive(
+    bankId: string,
+    input: {
+      teacherId?: string;
+      title?: string;
+      subject?: string;
+      grade?: QuestionBank['grade'];
+      topic?: string;
+      difficulty?: QuestionBank['difficulty'];
+      driveFileId?: string;
+      driveFileName?: string;
+      driveModifiedTime?: string;
+      bankSnapshot?: QuestionBank;
+      items: Array<{
+        prompt: string;
+        options: string[];
+        correctIndex: number;
+        explanation?: string;
+        points?: number;
+        difficulty?: QuestionBank['difficulty'];
+        hint?: string;
+      }>;
+    }
+  ) {
+    if (!this.db.questionBanks[bankId] && input.bankSnapshot?.id === bankId) {
+      this.db.questionBanks[bankId] = input.bankSnapshot;
+    }
+    const existingBank = this.db.questionBanks[bankId];
+    if (!existingBank) return null;
+
+    const nowIso = new Date().toISOString();
+    const letters = ['A', 'B', 'C', 'D', 'E'] as const;
+    const validDiffs: QuestionBank['difficulty'][] = ['Mudah', 'Sedang', 'Sulit'];
+    const validGrades: QuestionBank['grade'][] = ['10', '11', '12', 'Umum'];
+
+    const cleanTitle = (String(input.title ?? existingBank.title).trim() || existingBank.title).slice(0, 120);
+    const cleanSubject = (String(input.subject ?? existingBank.subject).trim() || existingBank.subject).slice(0, 80);
+    const cleanTopic = (String(input.topic ?? existingBank.topic).trim() || cleanTitle).slice(0, 100);
+    const cleanGrade: QuestionBank['grade'] =
+      input.grade && validGrades.includes(input.grade) ? input.grade : existingBank.grade;
+    const cleanDifficulty: QuestionBank['difficulty'] =
+      input.difficulty && validDiffs.includes(input.difficulty) ? input.difficulty : existingBank.difficulty;
+
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+      throw new Error('Minimal 1 soal wajib disertakan saat menyinkronkan bank soal.');
+    }
+
+    const normalizedItems = input.items.map((item, idx) => {
+      const prompt = String(item?.prompt ?? '').trim().slice(0, 1000);
+      if (prompt.length < 2) {
+        throw new Error(`Teks pertanyaan pada Soal #${idx + 1} wajib diisi minimal 2 karakter.`);
+      }
+      const rawOptions = Array.isArray(item?.options) ? item.options : [];
+      const cleanOptions = rawOptions
+        .slice(0, 5)
+        .map((o) => String(o ?? '').trim().slice(0, 300));
+      if (cleanOptions.length < 2 || cleanOptions.some((o) => o.length === 0)) {
+        throw new Error(`Soal #${idx + 1} harus memiliki minimal 2 pilihan jawaban yang tidak kosong.`);
+      }
+      const parsedIndex = Math.trunc(Number(item.correctIndex));
+      const safeIndex = Number.isFinite(parsedIndex)
+        ? Math.min(Math.max(0, parsedIndex), cleanOptions.length - 1)
+        : 0;
+      const rawPoints = Math.round(Number(item.points));
+      const safePoints = Number.isFinite(rawPoints) ? Math.min(1000, Math.max(1, rawPoints)) : 20;
+      const itemDiff: QuestionBank['difficulty'] =
+        item.difficulty && validDiffs.includes(item.difficulty) ? item.difficulty : cleanDifficulty;
+
+      return {
+        prompt,
+        cleanOptions,
+        safeIndex,
+        safePoints,
+        itemDiff,
+        hint: item.hint ? String(item.hint).trim().slice(0, 400) : undefined,
+        explanation: item.explanation ? String(item.explanation).trim().slice(0, 1000) : '',
+      };
+    });
+
+    // Remove previous questions and isolated keys belonging to this bank before writing refreshed set
+    for (const [qId, q] of Object.entries(this.db.questions)) {
+      if (q.bankId === bankId) {
+        delete this.db.questions[qId];
+      }
+    }
+    for (const [kId, k] of Object.entries(this.db.answerKeys)) {
+      if (k.bankId === bankId) {
+        delete this.db.answerKeys[kId];
+      }
+    }
+
+    const syncTag = Date.now().toString(36);
+    const savedQuestions: StudentQuestion[] = [];
+    const savedKeys: AnswerKey[] = [];
+
+    normalizedItems.forEach((item, idx) => {
+      const qId = `${bankId}_s${syncTag}_q${idx + 1}`;
+      const q: StudentQuestion = {
+        id: qId,
+        bankId,
+        teacherId: existingBank.teacherId,
+        orderIndex: idx,
+        prompt: item.prompt,
+        options: item.cleanOptions,
+        points: item.safePoints,
+        difficulty: item.itemDiff,
+        ...(item.hint ? { hint: item.hint } : {}),
+        zoneId: ZONE_ORDER[idx % ZONE_ORDER.length],
+        isPublished: true,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      const k: AnswerKey = {
+        questionId: qId,
+        bankId,
+        teacherId: existingBank.teacherId,
+        correctIndex: item.safeIndex,
+        correctLetter: letters[item.safeIndex] || 'A',
+        explanation: item.explanation,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      this.db.questions[qId] = q;
+      this.db.answerKeys[qId] = k;
+      savedQuestions.push(q);
+      savedKeys.push(k);
+    });
+
+    const updatedBank: QuestionBank = {
+      ...existingBank,
+      title: cleanTitle,
+      subject: cleanSubject,
+      grade: cleanGrade,
+      topic: cleanTopic,
+      difficulty: cleanDifficulty,
+      questionCount: savedQuestions.length,
+      driveFileId: input.driveFileId ? String(input.driveFileId).slice(0, 200) : existingBank.driveFileId,
+      driveFileName: input.driveFileName ? String(input.driveFileName).slice(0, 200) : existingBank.driveFileName,
+      driveModifiedTime: input.driveModifiedTime
+        ? String(input.driveModifiedTime).slice(0, 64)
+        : existingBank.driveModifiedTime,
+      lastSyncedAt: nowIso,
+      updatedAt: nowIso,
+    };
+    this.db.questionBanks[bankId] = updatedBank;
+
+    // Keep linked GameSessions totals accurate
+    const totalPoints = savedQuestions.reduce((acc, q) => acc + q.points, 0);
+    for (const [sId, sess] of Object.entries(this.db.gameSessions)) {
+      if (sess.bankId === bankId && sess.status !== 'ended') {
+        this.db.gameSessions[sId] = {
+          ...sess,
+          questionCount: savedQuestions.length,
+          totalPoints,
+          updatedAt: nowIso,
+        };
+      }
+    }
+
+    this.logAudit(
+      input.teacherId || existingBank.teacherId,
+      'guru',
+      'SYNC_DRIVE_QUESTION_BANK',
+      'questionBank',
+      bankId,
+      `Menyinkronkan bank soal "${updatedBank.title}" dari Google Drive (${savedQuestions.length} soal)`
+    );
+    this.persist();
+    return { bank: updatedBank, questions: savedQuestions, answerKeys: savedKeys };
   }
 
   public createGameSession(input: {
@@ -892,6 +1089,7 @@ class EduverseServerStore {
     bankId: string;
     title: string;
     gameMode: GameSession['gameMode'];
+    arenaId?: ArenaThemeId;
     difficulty: GameSession['difficulty'];
     durationMinutes: number;
     maxAttempts: number;
@@ -933,6 +1131,7 @@ class EduverseServerStore {
     const nowIso = now.toISOString();
     const randomCode = `${bank.subject.slice(0, 2).toUpperCase().replace(/[^A-Z]/g, 'E')}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const id = `sess_${Date.now()}`;
+    const resolvedArena = resolveArenaIdFromSession({ arenaId: input.arenaId || DEFAULT_ARENA_ID });
 
     const session: GameSession = {
       id,
@@ -946,7 +1145,8 @@ class EduverseServerStore {
       topic: bank.topic,
       difficulty: input.difficulty,
       gameMode: input.gameMode,
-      worldId: 'world_eduverse_utama',
+      worldId: arenaIdToWorldId(resolvedArena),
+      arenaId: resolvedArena,
       durationMinutes: Math.min(240, Math.max(1, input.durationMinutes)),
       maxAttempts: Math.min(20, Math.max(1, input.maxAttempts)),
       questionCount: bankQuestions.length,
@@ -967,7 +1167,7 @@ class EduverseServerStore {
       'CREATE_GAME_SESSION',
       'gameSession',
       id,
-      `Membuat sesi ${session.title} dengan kode tautan ${session.joinCode}`
+      `Membuat sesi ${session.title} (${resolvedArena}) dengan kode tautan ${session.joinCode}`
     );
     this.persist();
     return session;
@@ -975,13 +1175,17 @@ class EduverseServerStore {
 
   public updateGameSession(
     sessionId: string,
-    patch: Partial<Pick<GameSession, 'isLinkActive' | 'status' | 'endsAt' | 'maxAttempts' | 'durationMinutes' | 'title'>>
+    patch: Partial<
+      Pick<GameSession, 'isLinkActive' | 'status' | 'endsAt' | 'maxAttempts' | 'durationMinutes' | 'title' | 'arenaId'>
+    >
   ) {
     const existing = this.db.gameSessions[sessionId];
     if (!existing) return null;
+    const nextArena = patch.arenaId ? resolveArenaIdFromSession({ arenaId: patch.arenaId }) : existing.arenaId;
     const updated: GameSession = {
       ...existing,
       ...patch,
+      ...(nextArena ? { arenaId: nextArena, worldId: arenaIdToWorldId(nextArena) } : {}),
       updatedAt: new Date().toISOString(),
     };
     this.db.gameSessions[sessionId] = updated;
@@ -995,6 +1199,106 @@ class EduverseServerStore {
     );
     this.persist();
     return updated;
+  }
+
+  public getFiftyFiftyDistractors(joinCode: string, questionId: string) {
+    const session = this.getSessionByCode(joinCode);
+    const access = validateSessionAccess(session);
+    if (!access.allowed || !session) {
+      return { ok: false as const, status: 403, error: access.reason || 'Sesi tidak aktif.' };
+    }
+    const question = this.db.questions[questionId];
+    const answerKey = this.db.answerKeys[questionId];
+    if (!question || !answerKey || question.bankId !== session.bankId) {
+      return { ok: false as const, status: 404, error: 'Soal atau kunci jawaban tidak ditemukan.' };
+    }
+    const eliminatedIndices = pickFiftyFiftyEliminations(question.options.length, answerKey.correctIndex);
+    return { ok: true as const, eliminatedIndices };
+  }
+
+  public getAdminAuthStatus() {
+    const envPassword = process.env.ADMIN_PASSWORD?.trim() || '';
+    const hasStored = Boolean(this.db.adminCredential?.hash && this.db.adminCredential?.salt);
+    const source: 'env' | 'stored' | 'unset' = envPassword ? 'env' : hasStored ? 'stored' : 'unset';
+    return {
+      configured: source !== 'unset',
+      needsSetup: source === 'unset',
+      source,
+      updatedAt: this.db.adminCredential?.updatedAt || null,
+    };
+  }
+
+  public setupInitialAdminPassword(password: string) {
+    const status = this.getAdminAuthStatus();
+    if (!status.needsSetup) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: 'Password admin website sudah dikonfigurasi. Gunakan formulir login admin.',
+      };
+    }
+    const cred = hashAdminPassword(password);
+    this.db.adminCredential = cred;
+    this.logAudit(
+      'admin_website',
+      'super_admin',
+      'ADMIN_PASSWORD_CONFIGURED',
+      'adminAuth',
+      'website_admin',
+      'Mengaktifkan proteksi password admin website secara aman (scrypt hash).'
+    );
+    this.persist();
+    return { ok: true as const, updatedAt: cred.updatedAt };
+  }
+
+  public verifyAdminLogin(password: string): boolean {
+    const candidate = String(password || '');
+    if (!candidate) return false;
+    const envPassword = process.env.ADMIN_PASSWORD?.trim() || '';
+    if (envPassword) {
+      return verifyPlainPasswordTimingSafe(candidate, envPassword);
+    }
+    if (this.db.adminCredential) {
+      return verifyScryptPassword(candidate, this.db.adminCredential);
+    }
+    return false;
+  }
+
+  public changeAdminPassword(currentPassword: string, newPassword: string) {
+    const status = this.getAdminAuthStatus();
+    if (status.source === 'env') {
+      return {
+        ok: false as const,
+        status: 400,
+        error: 'Password admin dikelola melalui variabel lingkungan ADMIN_PASSWORD pada server.',
+      };
+    }
+    if (status.needsSetup) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: 'Password admin belum diatur.',
+      };
+    }
+    if (!this.verifyAdminLogin(currentPassword)) {
+      return {
+        ok: false as const,
+        status: 401,
+        error: 'Password admin saat ini salah.',
+      };
+    }
+    const cred = hashAdminPassword(newPassword);
+    this.db.adminCredential = cred;
+    this.logAudit(
+      'admin_website',
+      'super_admin',
+      'ADMIN_PASSWORD_CHANGED',
+      'adminAuth',
+      'website_admin',
+      'Password admin website diperbarui secara aman.'
+    );
+    this.persist();
+    return { ok: true as const, updatedAt: cred.updatedAt };
   }
 }
 

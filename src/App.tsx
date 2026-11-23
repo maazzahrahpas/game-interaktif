@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
+import { AdminAuthModal } from './components/AdminAuthModal.tsx';
 import { LandingPage } from './components/LandingPage.tsx';
 import { JoinSessionGate, type JoinedSessionPayload } from './components/JoinSessionGate.tsx';
 import { WorldPlayView } from './components/WorldPlayView.tsx';
 import { TeacherDashboard } from './components/TeacherDashboard.tsx';
 import { StudentDashboard } from './components/StudentDashboard.tsx';
 import { AudioProvider } from './contexts/AudioContext.tsx';
-import type { EduverseUser, StudentProgress } from './types/eduverse.ts';
+import { DEFAULT_ARENA_ID, DEFAULT_SKIN_ID } from './game/gameCatalog.ts';
+import type {
+  ArenaThemeId,
+  CharacterSkinId,
+  EduverseUser,
+  StudentProgress,
+} from './types/eduverse.ts';
 import {
   fetchExistingUserProfile,
   signInWithGoogleRole,
@@ -18,9 +25,9 @@ type AppView = 'landing' | 'join' | 'world' | 'teacher' | 'student';
 
 const DEMO_TEACHER_USER: EduverseUser = {
   uid: 'teacher_demo_1',
-  displayName: 'Ibu Ratna Sari, S.Pd',
-  email: 'ratna.guru@eduverse.app',
-  role: 'guru',
+  displayName: 'Admin & Guru Eduverse',
+  email: 'admin.guru@eduverse.app',
+  role: 'super_admin',
   avatarColor: '#0EA5E9',
   xp: 0,
   level: 1,
@@ -56,6 +63,12 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [bootingWorld, setBootingWorld] = useState(initialRoute.autostart);
   const [activeWorldPayload, setActiveWorldPayload] = useState<JoinedSessionPayload | null>(null);
+
+  const [adminToken, setAdminToken] = useState<string | null>(null);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [selectedArenaId, setSelectedArenaId] = useState<ArenaThemeId>(DEFAULT_ARENA_ID);
+  const [selectedSkinId, setSelectedSkinId] = useState<CharacterSkinId>(DEFAULT_SKIN_ID);
+  const [selectedAvatarColor, setSelectedAvatarColor] = useState<string>('#2563EB');
 
   // Sync Tailwind dark class on <html>
   useEffect(() => {
@@ -102,7 +115,15 @@ export default function App() {
   const launchDirectSessionWorld = useCallback(
     async (
       targetCode: string,
-      identity?: { studentId: string; studentName: string; studentIdentity?: string; avatarColor?: string }
+      identity?: {
+        studentId: string;
+        studentName: string;
+        studentIdentity?: string;
+        avatarColor?: string;
+        skinId?: CharacterSkinId;
+        arenaIdOverride?: ArenaThemeId;
+        openQuizOnStart?: boolean;
+      }
     ) => {
       setBootingWorld(true);
       setAuthError(null);
@@ -118,7 +139,8 @@ export default function App() {
         const studentId = identity?.studentId || 'stu_demo_explorer';
         const studentName = identity?.studentName || 'Penjelajah Eduverse';
         const studentIdentity = identity?.studentIdentity || 'XI IPA 1';
-        const avatarColor = identity?.avatarColor || '#2563EB';
+        const avatarColor = identity?.avatarColor || selectedAvatarColor || '#2563EB';
+        const skinId = identity?.skinId || selectedSkinId;
 
         const joinRes = await fetch(`/api/sessions/${encodeURIComponent(cleanCode)}/join`, {
           method: 'POST',
@@ -144,6 +166,9 @@ export default function App() {
           studentId,
           studentName,
           avatarColor,
+          skinId,
+          arenaIdOverride: identity?.arenaIdOverride,
+          openQuizOnStart: identity?.openQuizOnStart,
         });
         setView('world');
       } catch {
@@ -152,7 +177,7 @@ export default function App() {
         setBootingWorld(false);
       }
     },
-    []
+    [selectedAvatarColor, selectedSkinId]
   );
 
   // Support ?autostart=1 to jump directly into playable 3D world
@@ -188,6 +213,7 @@ export default function App() {
     try {
       const profile = await signInWithGoogleRole(role);
       setCurrentUser(profile);
+      setShowAdminModal(false);
       if (profile.role === 'guru' || profile.role === 'super_admin') {
         setView('teacher');
       } else {
@@ -196,7 +222,7 @@ export default function App() {
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       if (raw.includes('popup-closed-by-user') || raw.includes('cancelled-popup-request')) {
-        setAuthError('Login Google dibatalkan. Anda juga dapat langsung masuk lewat Dashboard Guru atau kode sesi.');
+        setAuthError('Login Google dibatalkan. Anda juga dapat masuk lewat Dashboard Guru atau kode sesi.');
       } else if (raw.includes('popup-blocked')) {
         setAuthError('Popup login Google diblokir browser. Izinkan popup atau gunakan tombol Dashboard Guru / Gabung Sesi.');
       } else {
@@ -209,15 +235,33 @@ export default function App() {
 
   const handleEnterTeacherWorkspace = () => {
     setAuthError(null);
-    if (currentUser && (currentUser.role === 'guru' || currentUser.role === 'super_admin')) {
+    if (adminToken || (currentUser && (currentUser.role === 'guru' || currentUser.role === 'super_admin'))) {
       setView('teacher');
       return;
     }
-    setCurrentUser(DEMO_TEACHER_USER);
+    setShowAdminModal(true);
+  };
+
+  const handleAdminAuthenticated = (token: string) => {
+    setAdminToken(token);
+    setShowAdminModal(false);
+    if (!currentUser || (currentUser.role !== 'guru' && currentUser.role !== 'super_admin')) {
+      setCurrentUser({
+        ...DEMO_TEACHER_USER,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     setView('teacher');
   };
 
   const handleLogout = async () => {
+    if (adminToken) {
+      fetch('/api/admin/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      }).catch(() => undefined);
+      setAdminToken(null);
+    }
     try {
       await signOutFirebase();
     } catch {
@@ -229,7 +273,7 @@ export default function App() {
 
   const handleExitWorld = (latestProgress: StudentProgress) => {
     document.body.dataset.state = 'title';
-    if (currentUser && (currentUser.role === 'guru' || currentUser.role === 'super_admin')) {
+    if (adminToken || (currentUser && (currentUser.role === 'guru' || currentUser.role === 'super_admin'))) {
       setView('teacher');
       return;
     }
@@ -243,7 +287,8 @@ export default function App() {
       displayName: latestProgress.studentName,
       identityNumber: latestProgress.studentIdentity,
       role: 'siswa',
-      avatarColor: activeWorldPayload?.avatarColor || '#2563EB',
+      avatarColor: activeWorldPayload?.avatarColor || selectedAvatarColor,
+      skinId: activeWorldPayload?.skinId || selectedSkinId,
       xp: latestProgress.xpEarned,
       level: Math.max(1, Math.floor(latestProgress.xpEarned / 100) + 1),
       createdAt: latestProgress.createdAt,
@@ -274,6 +319,9 @@ export default function App() {
         studentId={activeWorldPayload.studentId}
         studentName={activeWorldPayload.studentName}
         avatarColor={activeWorldPayload.avatarColor}
+        skinId={activeWorldPayload.skinId ?? selectedSkinId}
+        arenaId={activeWorldPayload.arenaIdOverride}
+        openQuizOnStart={activeWorldPayload.openQuizOnStart}
         onExitWorld={handleExitWorld}
       />
     );
@@ -283,8 +331,14 @@ export default function App() {
         joinCode={joinCode}
         defaultStudentName={currentUser?.displayName || ''}
         defaultStudentId={currentUser?.uid}
+        defaultSkinId={selectedSkinId}
+        defaultAvatarColor={selectedAvatarColor}
+        defaultArenaId={selectedArenaId}
         onBack={navigateToLanding}
         onJoinedSuccess={(payload) => {
+          if (payload.skinId) setSelectedSkinId(payload.skinId);
+          if (payload.avatarColor) setSelectedAvatarColor(payload.avatarColor);
+          if (payload.arenaIdOverride) setSelectedArenaId(payload.arenaIdOverride);
           setActiveWorldPayload(payload);
           setView('world');
         }}
@@ -299,13 +353,15 @@ export default function App() {
       <TeacherDashboard
         user={teacherUser}
         darkMode={darkMode}
+        adminToken={adminToken}
         onToggleTheme={() => setDarkMode((d) => !d)}
         onLaunchSessionWorld={(code) =>
           void launchDirectSessionWorld(code, {
             studentId: `tester_${teacherUser.uid}`,
             studentName: `${teacherUser.displayName} (Uji)`,
             studentIdentity: 'GURU-TEST',
-            avatarColor: '#0EA5E9',
+            avatarColor: selectedAvatarColor,
+            skinId: selectedSkinId,
           })
         }
         onLogout={() => void handleLogout()}
@@ -319,6 +375,12 @@ export default function App() {
         onToggleTheme={() => setDarkMode((d) => !d)}
         onJoinSessionCode={navigateToJoinCode}
         onLogout={() => void handleLogout()}
+        selectedArenaId={selectedArenaId}
+        onChangeArenaId={setSelectedArenaId}
+        selectedSkinId={selectedSkinId}
+        onChangeSkinId={setSelectedSkinId}
+        avatarColor={selectedAvatarColor}
+        onChangeAvatarColor={setSelectedAvatarColor}
       />
     );
   } else {
@@ -329,12 +391,48 @@ export default function App() {
         onLoginRole={(role) => void handleLoginRole(role)}
         onEnterDemoTeacher={handleEnterTeacherWorkspace}
         onOpenJoinCode={navigateToJoinCode}
-        onStartDemoWorld={() => void launchDirectSessionWorld('EDU101')}
+        onStartDemoWorld={() =>
+          void launchDirectSessionWorld('EDU101', {
+            studentId: 'stu_demo_explorer',
+            studentName: 'Penjelajah Eduverse',
+            avatarColor: selectedAvatarColor,
+            skinId: selectedSkinId,
+            arenaIdOverride: selectedArenaId,
+          })
+        }
+        onStartQuizBlitz={() =>
+          void launchDirectSessionWorld('EDU101', {
+            studentId: 'stu_demo_explorer',
+            studentName: 'Penjelajah Eduverse',
+            avatarColor: selectedAvatarColor,
+            skinId: selectedSkinId,
+            arenaIdOverride: selectedArenaId,
+            openQuizOnStart: true,
+          })
+        }
+        selectedArenaId={selectedArenaId}
+        onChangeArenaId={setSelectedArenaId}
+        selectedSkinId={selectedSkinId}
+        onChangeSkinId={setSelectedSkinId}
+        avatarColor={selectedAvatarColor}
+        onChangeAvatarColor={setSelectedAvatarColor}
         authLoading={authLoading}
         authError={authError}
       />
     );
   }
 
-  return <AudioProvider>{content}</AudioProvider>;
+  return (
+    <AudioProvider>
+      {content}
+      <AdminAuthModal
+        open={showAdminModal}
+        onClose={() => setShowAdminModal(false)}
+        onAuthenticated={handleAdminAuthenticated}
+        onGoogleGuruLogin={() => void handleLoginRole('guru')}
+        googleLoading={authLoading}
+      />
+    </AudioProvider>
+  );
 }
+

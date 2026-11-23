@@ -45,6 +45,28 @@
       "isActive": true,
       "createdAt": "2026-11-18T00:53:46.187Z",
       "updatedAt": "2026-11-18T00:53:46.187Z"
+    },
+    "cls_1795395118902": {
+      "id": "cls_1795395118902",
+      "teacherId": "teacher_vercel_test",
+      "name": "XI IPA Vercel",
+      "grade": "11",
+      "subject": "Matematika",
+      "inviteCode": "MAT133",
+      "isActive": true,
+      "createdAt": "2026-11-23T00:51:58.902Z",
+      "updatedAt": "2026-11-23T00:51:58.902Z"
+    },
+    "cls_1795395142884": {
+      "id": "cls_1795395142884",
+      "teacherId": "teacher_vercel_test",
+      "name": "XI IPA Vercel",
+      "grade": "11",
+      "subject": "Matematika",
+      "inviteCode": "MAT976",
+      "isActive": true,
+      "createdAt": "2026-11-23T00:52:22.884Z",
+      "updatedAt": "2026-11-23T00:52:22.884Z"
     }
   },
   "questionBanks": {
@@ -179,6 +201,54 @@
       "questionCount": 1,
       "createdAt": "2026-11-18T00:54:34.542Z",
       "updatedAt": "2026-11-18T00:54:34.542Z"
+    },
+    "bank_1795395117414_0vpe": {
+      "id": "bank_1795395117414_0vpe",
+      "teacherId": "teacher_unit_test",
+      "title": "Uji Bank Soal Unit",
+      "subject": "Biologi",
+      "grade": "11",
+      "topic": "Uji Bank Soal Unit",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-23T00:51:57.414Z",
+      "updatedAt": "2026-11-23T00:51:57.414Z"
+    },
+    "bank_1795395118892_k6d0": {
+      "id": "bank_1795395118892_k6d0",
+      "teacherId": "teacher_vercel_test",
+      "title": "Bank Soal Uji Vercel",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-23T00:51:58.892Z",
+      "updatedAt": "2026-11-23T00:51:58.892Z"
+    },
+    "bank_1795395141916_ty9a": {
+      "id": "bank_1795395141916_ty9a",
+      "teacherId": "teacher_unit_test",
+      "title": "Uji Bank Soal Unit",
+      "subject": "Biologi",
+      "grade": "11",
+      "topic": "Uji Bank Soal Unit",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-23T00:52:21.915Z",
+      "updatedAt": "2026-11-23T00:52:21.915Z"
+    },
+    "bank_1795395142871_otwy": {
+      "id": "bank_1795395142871_otwy",
+      "teacherId": "teacher_vercel_test",
+      "title": "Bank Soal Uji Vercel",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "questionCount": 1,
+      "createdAt": "2026-11-23T00:52:22.871Z",
+      "updatedAt": "2026-11-23T00:52:22.871Z"
     }
   },
   "questions": {
@@ -597,6 +667,84 @@
       "isPublished": true,
       "createdAt": "2026-11-18T00:54:34.542Z",
       "updatedAt": "2026-11-18T00:54:34.542Z"
+    },
+    "bank_1795395117414_0vpe_q1": {
+      "id": "bank_1795395117414_0vpe_q1",
+      "bankId": "bank_1795395117414_0vpe",
+      "teacherId": "teacher_unit_test",
+      "orderIndex": 0,
+      "prompt": "Apa pusat energi sel?",
+      "options": [
+        "Ribosom",
+        "Mitokondria",
+        "Vakuola",
+        "Lisosom",
+        "Nukleus"
+      ],
+      "points": 25,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-23T00:51:57.414Z",
+      "updatedAt": "2026-11-23T00:51:57.414Z"
+    },
+    "bank_1795395118892_k6d0_q1": {
+      "id": "bank_1795395118892_k6d0_q1",
+      "bankId": "bank_1795395118892_k6d0",
+      "teacherId": "teacher_vercel_test",
+      "orderIndex": 0,
+      "prompt": "Berapakah hasil dari 3 x 4?",
+      "options": [
+        "7",
+        "12",
+        "15",
+        "9"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-23T00:51:58.892Z",
+      "updatedAt": "2026-11-23T00:51:58.892Z"
+    },
+    "bank_1795395141916_ty9a_q1": {
+      "id": "bank_1795395141916_ty9a_q1",
+      "bankId": "bank_1795395141916_ty9a",
+      "teacherId": "teacher_unit_test",
+      "orderIndex": 0,
+      "prompt": "Apa pusat energi sel?",
+      "options": [
+        "Ribosom",
+        "Mitokondria",
+        "Vakuola",
+        "Lisosom",
+        "Nukleus"
+      ],
+      "points": 25,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-23T00:52:21.915Z",
+      "updatedAt": "2026-11-23T00:52:21.915Z"
+    },
+    "bank_1795395142871_otwy_q1": {
+      "id": "bank_1795395142871_otwy_q1",
+      "bankId": "bank_1795395142871_otwy",
+      "teacherId": "teacher_vercel_test",
+      "orderIndex": 0,
+      "prompt": "Berapakah hasil dari 3 x 4?",
+      "options": [
+        "7",
+        "12",
+        "15",
+        "9"
+      ],
+      "points": 20,
+      "difficulty": "Sedang",
+      "zoneId": "sekolah",
+      "isPublished": true,
+      "createdAt": "2026-11-23T00:52:22.871Z",
+      "updatedAt": "2026-11-23T00:52:22.871Z"
     }
   },
   "answerKeys": {
@@ -809,6 +957,46 @@
       "explanation": "",
       "createdAt": "2026-11-18T00:54:34.542Z",
       "updatedAt": "2026-11-18T00:54:34.542Z"
+    },
+    "bank_1795395117414_0vpe_q1": {
+      "questionId": "bank_1795395117414_0vpe_q1",
+      "bankId": "bank_1795395117414_0vpe",
+      "teacherId": "teacher_unit_test",
+      "correctIndex": 4,
+      "correctLetter": "E",
+      "explanation": "Mitokondria menghasilkan ATP.",
+      "createdAt": "2026-11-23T00:51:57.414Z",
+      "updatedAt": "2026-11-23T00:51:57.414Z"
+    },
+    "bank_1795395118892_k6d0_q1": {
+      "questionId": "bank_1795395118892_k6d0_q1",
+      "bankId": "bank_1795395118892_k6d0",
+      "teacherId": "teacher_vercel_test",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "3 dikali 4 sama dengan 12.",
+      "createdAt": "2026-11-23T00:51:58.892Z",
+      "updatedAt": "2026-11-23T00:51:58.892Z"
+    },
+    "bank_1795395141916_ty9a_q1": {
+      "questionId": "bank_1795395141916_ty9a_q1",
+      "bankId": "bank_1795395141916_ty9a",
+      "teacherId": "teacher_unit_test",
+      "correctIndex": 4,
+      "correctLetter": "E",
+      "explanation": "Mitokondria menghasilkan ATP.",
+      "createdAt": "2026-11-23T00:52:21.915Z",
+      "updatedAt": "2026-11-23T00:52:21.915Z"
+    },
+    "bank_1795395142871_otwy_q1": {
+      "questionId": "bank_1795395142871_otwy_q1",
+      "bankId": "bank_1795395142871_otwy",
+      "teacherId": "teacher_vercel_test",
+      "correctIndex": 1,
+      "correctLetter": "B",
+      "explanation": "3 dikali 4 sama dengan 12.",
+      "createdAt": "2026-11-23T00:52:22.871Z",
+      "updatedAt": "2026-11-23T00:52:22.871Z"
     }
   },
   "gameSessions": {
@@ -886,6 +1074,58 @@
       "endsAt": "2026-11-20T00:53:46.194Z",
       "createdAt": "2026-11-18T00:53:46.194Z",
       "updatedAt": "2026-11-18T00:53:46.194Z"
+    },
+    "sess_1795395118911": {
+      "id": "sess_1795395118911",
+      "teacherId": "teacher_vercel_test",
+      "classId": "cls_cold_snapshot",
+      "bankId": "bank_cold_snapshot",
+      "joinCode": "MAPLWM",
+      "title": "Sesi Snapshot Cold Lambda",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "gameMode": "Quiz Adventure",
+      "worldId": "world_eduverse_utama",
+      "arenaId": "akademi_langit",
+      "durationMinutes": 30,
+      "maxAttempts": 2,
+      "questionCount": 1,
+      "totalPoints": 25,
+      "isLinkActive": true,
+      "status": "active",
+      "requireIdentity": true,
+      "startsAt": "2026-11-23T00:51:58.911Z",
+      "endsAt": "2026-11-25T00:51:58.911Z",
+      "createdAt": "2026-11-23T00:51:58.911Z",
+      "updatedAt": "2026-11-23T00:51:58.911Z"
+    },
+    "sess_1795395142891": {
+      "id": "sess_1795395142891",
+      "teacherId": "teacher_vercel_test",
+      "classId": "cls_cold_snapshot",
+      "bankId": "bank_cold_snapshot",
+      "joinCode": "MA39EV",
+      "title": "Sesi Snapshot Cold Lambda",
+      "subject": "Matematika",
+      "grade": "11",
+      "topic": "Aljabar",
+      "difficulty": "Sedang",
+      "gameMode": "Quiz Adventure",
+      "worldId": "world_eduverse_utama",
+      "arenaId": "akademi_langit",
+      "durationMinutes": 30,
+      "maxAttempts": 2,
+      "questionCount": 1,
+      "totalPoints": 25,
+      "isLinkActive": true,
+      "status": "active",
+      "requireIdentity": true,
+      "startsAt": "2026-11-23T00:52:22.891Z",
+      "endsAt": "2026-11-25T00:52:22.891Z",
+      "createdAt": "2026-11-23T00:52:22.891Z",
+      "updatedAt": "2026-11-23T00:52:22.891Z"
     }
   },
   "studentProgress": {
@@ -896,23 +1136,41 @@
       "teacherId": "teacher_demo_1",
       "studentName": "Penjelajah Eduverse",
       "studentIdentity": "XI IPA 1",
-      "score": 0,
-      "xpEarned": 0,
-      "correctCount": 0,
-      "totalAnswered": 0,
+      "score": 20,
+      "xpEarned": 57,
+      "correctCount": 1,
+      "totalAnswered": 1,
       "attemptsUsed": 1,
-      "completedQuests": [],
+      "completedQuests": [
+        "bio_q1"
+      ],
       "unlockedZones": [
         "sekolah",
-        "taman"
+        "taman",
+        "lab"
       ],
       "currentZone": "sekolah",
       "status": "active",
       "createdAt": "2026-11-17T02:37:20.438Z",
-      "updatedAt": "2026-11-17T03:27:02.652Z"
+      "updatedAt": "2026-11-23T01:04:33.604Z"
     }
   },
-  "submissions": {},
+  "submissions": {
+    "sub_sess_edu101_stu_demo_explorer_bio_q1_1": {
+      "id": "sub_sess_edu101_stu_demo_explorer_bio_q1_1",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_demo_explorer",
+      "studentName": "Penjelajah Eduverse",
+      "teacherId": "teacher_demo_1",
+      "questionId": "bio_q1",
+      "selectedIndex": 1,
+      "isCorrect": true,
+      "pointsEarned": 20,
+      "xpEarned": 32,
+      "attemptNumber": 1,
+      "submittedAt": "2026-11-23T00:54:26.623Z"
+    }
+  },
   "leaderboard": {
     "lb_sess_edu101_stu_demo_explorer": {
       "id": "lb_sess_edu101_stu_demo_explorer",
@@ -920,16 +1178,126 @@
       "studentId": "stu_demo_explorer",
       "teacherId": "teacher_demo_1",
       "studentName": "Penjelajah Eduverse",
-      "score": 0,
-      "xp": 0,
+      "score": 20,
+      "xp": 57,
       "level": 1,
-      "accuracy": 0,
+      "accuracy": 100,
       "isPublicInSession": true,
-      "updatedAt": "2026-11-17T02:37:20.438Z"
+      "updatedAt": "2026-11-23T00:54:26.623Z"
     }
   },
-  "achievements": {},
+  "achievements": {
+    "ach_stu_demo_explorer_FIRST_SPARK": {
+      "id": "ach_stu_demo_explorer_FIRST_SPARK",
+      "studentId": "stu_demo_explorer",
+      "badgeCode": "FIRST_SPARK",
+      "title": "Langkah Pertama",
+      "description": "Menjawab 1 soal misi dengan benar.",
+      "xpBonus": 25,
+      "unlockedAt": "2026-11-23T00:54:26.623Z"
+    }
+  },
   "auditLogs": [
+    {
+      "id": "log_1795395937867_9hrnu",
+      "actorId": "admin_website",
+      "actorRole": "super_admin",
+      "action": "ADMIN_LOGIN_SUCCESS",
+      "targetType": "adminAuth",
+      "targetId": "website_admin",
+      "summary": "Admin Website berhasil masuk dengan verifikasi server.",
+      "createdAt": "2026-11-23T01:05:37.867Z"
+    },
+    {
+      "id": "log_1795395937860_4jvu5",
+      "actorId": "anonymous",
+      "actorRole": "guru",
+      "action": "ADMIN_LOGIN_FAILED",
+      "targetType": "adminAuth",
+      "targetId": "website_admin",
+      "summary": "Percobaan login Admin Website dengan password tidak valid.",
+      "createdAt": "2026-11-23T01:05:37.860Z"
+    },
+    {
+      "id": "log_1795395142891_mcsqr",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "CREATE_GAME_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_1795395142891",
+      "summary": "Membuat sesi Sesi Snapshot Cold Lambda (akademi_langit) dengan kode tautan MA39EV",
+      "createdAt": "2026-11-23T00:52:22.891Z"
+    },
+    {
+      "id": "log_1795395142884_b1ijl",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "CREATE_CLASS",
+      "targetType": "class",
+      "targetId": "cls_1795395142884",
+      "summary": "Membuat kelas XI IPA Vercel",
+      "createdAt": "2026-11-23T00:52:22.884Z"
+    },
+    {
+      "id": "log_1795395142872_37kq4",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1795395142871_otwy",
+      "summary": "Menyimpan bank soal \"Bank Soal Uji Vercel\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-23T00:52:22.872Z"
+    },
+    {
+      "id": "log_1795395141916_14qwd",
+      "actorId": "teacher_unit_test",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1795395141916_ty9a",
+      "summary": "Menyimpan bank soal \"Uji Bank Soal Unit\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-23T00:52:21.916Z"
+    },
+    {
+      "id": "log_1795395118912_dnwip",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "CREATE_GAME_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_1795395118911",
+      "summary": "Membuat sesi Sesi Snapshot Cold Lambda (akademi_langit) dengan kode tautan MAPLWM",
+      "createdAt": "2026-11-23T00:51:58.912Z"
+    },
+    {
+      "id": "log_1795395118902_p3ccs",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "CREATE_CLASS",
+      "targetType": "class",
+      "targetId": "cls_1795395118902",
+      "summary": "Membuat kelas XI IPA Vercel",
+      "createdAt": "2026-11-23T00:51:58.902Z"
+    },
+    {
+      "id": "log_1795395118892_1kxdu",
+      "actorId": "teacher_vercel_test",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1795395118892_k6d0",
+      "summary": "Menyimpan bank soal \"Bank Soal Uji Vercel\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-23T00:51:58.892Z"
+    },
+    {
+      "id": "log_1795395117415_xi3vg",
+      "actorId": "teacher_unit_test",
+      "actorRole": "guru",
+      "action": "IMPORT_QUESTION_BANK",
+      "targetType": "questionBank",
+      "targetId": "bank_1795395117414_0vpe",
+      "summary": "Menyimpan bank soal \"Uji Bank Soal Unit\" (1 soal terverifikasi guru)",
+      "createdAt": "2026-11-23T00:51:57.415Z"
+    },
     {
       "id": "log_1794963274542_qxi3j",
       "actorId": "teacher_demo_1",

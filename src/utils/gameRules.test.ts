@@ -7,7 +7,9 @@ import {
   calculateStreakMultiplier,
   computeMusicIntensity,
   evaluateUnlockedBadges,
+  getQuizFeverStatus,
   getUnlockedZonesForProgress,
+  pickFiftyFiftyEliminations,
   resolveHazardHit,
   sortLeaderboard,
   validateSessionAccess,
@@ -161,4 +163,28 @@ test('calculateStreakMultiplier, speed bonus, music intensity, and hazard hit wo
     defeated: true,
   });
 });
+
+test('pickFiftyFiftyEliminations only removes wrong options and keeps correctIndex', () => {
+  const eliminated4 = pickFiftyFiftyEliminations(4, 1);
+  assert.equal(eliminated4.length, 2);
+  assert.equal(eliminated4.includes(1), false);
+  assert.equal(new Set(eliminated4).size, 2);
+
+  const eliminated5 = pickFiftyFiftyEliminations(5, 3);
+  assert.equal(eliminated5.length, 2);
+  assert.equal(eliminated5.includes(3), false);
+
+  const eliminated2 = pickFiftyFiftyEliminations(2, 0);
+  assert.deepEqual(eliminated2, []);
+});
+
+test('getQuizFeverStatus tiers scale cleanly by streak', () => {
+  assert.equal(getQuizFeverStatus(0).isFever, false);
+  assert.equal(getQuizFeverStatus(1).xpMultiplier, 1.25);
+  assert.equal(getQuizFeverStatus(2).isFever, true);
+  assert.equal(getQuizFeverStatus(2).xpMultiplier, 1.5);
+  assert.equal(getQuizFeverStatus(4).isFever, true);
+  assert.equal(getQuizFeverStatus(4).xpMultiplier, 2);
+});
+
 

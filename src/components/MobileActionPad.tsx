@@ -5,6 +5,7 @@ import type { WORLD_ZONES } from '../utils/gameRules.ts';
 interface MobileActionPadProps {
   dashStamina: number;
   nearNpcZone: (typeof WORLD_ZONES)[number] | null;
+  scaleMultiplier?: number;
   onJumpStart: () => void;
   onJumpEnd: () => void;
   onDash: () => void;
@@ -15,6 +16,7 @@ interface MobileActionPadProps {
 export const MobileActionPad: React.FC<MobileActionPadProps> = ({
   dashStamina,
   nearNpcZone,
+  scaleMultiplier = 1,
   onJumpStart,
   onJumpEnd,
   onDash,
@@ -26,10 +28,12 @@ export const MobileActionPad: React.FC<MobileActionPadProps> = ({
   const ringRadius = 24;
   const ringCirc = 2 * Math.PI * ringRadius;
   const dashOffset = ringCirc * (1 - Math.max(0, Math.min(100, dashStamina)) / 100);
+  const clampedScale = Math.max(0.8, Math.min(1.25, scaleMultiplier));
 
   return (
     <div
       data-testid="mobile-action-pad"
+      style={{ transform: `scale(${clampedScale})`, transformOrigin: 'bottom right' }}
       className="pointer-events-auto relative w-40 h-36 sm:w-48 sm:h-44 touch-none select-none shrink-0"
       onPointerDown={(e) => e.stopPropagation()}
     >

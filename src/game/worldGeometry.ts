@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { CharacterSkinId } from '../types/eduverse.ts';
+import { getArenaTheme, getCharacterSkin, type ArenaThemeConfig } from './gameCatalog.ts';
 
 export function createCanvasTexture(
   drawFn: (ctx: CanvasRenderingContext2D, size: number) => void,
@@ -82,22 +84,37 @@ export interface AvatarRig {
 }
 
 /**
- * Builds an original stylized 10-part Eduverse Explorer Avatar grounded at y = 0.
+ * Builds an original stylized 10-to-14-part Eduverse Explorer Avatar grounded at y = 0.
+ * Supports 6 distinct Character Skins via `skinId`.
  */
-export function buildCompositeAvatar(primaryColor: string, accentColor = '#F59E0B', isNpc = false): AvatarRig {
+export function buildCompositeAvatar(
+  primaryColor: string,
+  accentColor = '#F59E0B',
+  isNpc = false,
+  skinId: CharacterSkinId = 'explorer'
+): AvatarRig {
+  const skinCfg = getCharacterSkin(skinId);
   const root = new THREE.Group();
   const bodyGroup = new THREE.Group();
   root.add(bodyGroup);
 
+  const resolvedAccent = isNpc ? accentColor : skinCfg.accentColor;
+  const resolvedVisor = skinCfg.visorColor;
+
   const primaryMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(primaryColor),
-    roughness: 0.45,
-    metalness: 0.1,
+    color: new THREE.Color(primaryColor || skinCfg.defaultPrimary),
+    roughness: skinId === 'cyber_knight' || skinId === 'astro_pilot' ? 0.28 : 0.45,
+    metalness: skinId === 'cyber_knight' || skinId === 'astro_pilot' ? 0.35 : 0.1,
   });
   const darkMat = new THREE.MeshStandardMaterial({
     color: 0x1e293b,
     roughness: 0.72,
     metalness: 0.15,
+  });
+  const whiteMat = new THREE.MeshStandardMaterial({
+    color: 0xf8fafc,
+    roughness: 0.5,
+    metalness: 0.08,
   });
   const skinMat = new THREE.MeshStandardMaterial({
     color: isNpc ? 0xe2e8f0 : 0xfde2c4,
@@ -105,14 +122,14 @@ export function buildCompositeAvatar(primaryColor: string, accentColor = '#F59E0
     metalness: 0.05,
   });
   const accentMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(accentColor),
+    color: new THREE.Color(resolvedAccent),
     roughness: 0.25,
     metalness: 0.5,
   });
   const visorMat = new THREE.MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0284c7,
-    emissiveIntensity: 0.5,
+    color: new THREE.Color(resolvedVisor),
+    emissive: new THREE.Color(resolvedVisor),
+    emissiveIntensity: 0.65,
     roughness: 0.15,
     metalness: 0.6,
   });
@@ -141,34 +158,89 @@ export function buildCompositeAvatar(primaryColor: string, accentColor = '#F59E0
   bodyGroup.add(leftLeg, rightLeg);
 
   // Torso (primary silhouette)
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.85, 0.44), primaryMat);
+  const torsoMat = !isNpc && skinId === 'bio_scientist' ? whiteMat : primaryMat;
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.85, 0.44), torsoMat);
   torso.position.y = 1.15;
   torso.castShadow = true;
   bodyGroup.add(torso);
 
   // Chest badge / trim
-  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.28, 0.06), accentMat);
+  const chestPlate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.46, 0.28, 0.06),
+    !isNpc && skinId === 'cyber_knight' ? visorMat : accentMat
+  );
   chestPlate.position.set(0, 1.24, 0.24);
   bodyGroup.add(chestPlate);
 
-  // Explorer Backpack
-  const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.6, 0.24), darkMat);
-  backpack.position.set(0, 1.18, -0.32);
-  backpack.castShadow = true;
-  bodyGroup.add(backpack);
+  // Skin-specific Back Equipment & Shoulder Silhouette
+  if (!isNpc && skinCfg.headgearStyle === 'cyber_helm') {
+    const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.56, 0.32), visorMat);
+    wingL.position.set(-0.24, 1.32, -0.34);
+    wingL.rotation.z = 0.28;
+    const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.56, 0.32), visorMat);
+    wingR.position.set(0.24, 1.32, -0.34);
+    wingR.rotation.z = -0.28;
+    const pauldronL = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.34), accentMat);
+    pauldronL.position.set(-0.52, 1.56, 0);
+    const pauldronR = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.34), accentMat);
+    pauldronR.position.set(0.52, 1.56, 0);
+    bodyGroup.add(wingL, wingR, pauldronL, pauldronR);
+  } else if (!isNpc && skinCfg.headgearStyle === 'goggles') {
+    const tankGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.58, 10);
+    const tankL = new THREE.Mesh(tankGeo, visorMat);
+    tankL.position.set(-0.16, 1.2, -0.32);
+    const tankR = new THREE.Mesh(tankGeo, visorMat);
+    tankR.position.set(0.16, 1.2, -0.32);
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.42, 0.05), primaryMat);
+    tie.position.set(0, 1.18, 0.24);
+    bodyGroup.add(tankL, tankR, tie);
+  } else if (!isNpc && skinCfg.headgearStyle === 'wizard_hat') {
+    const cape = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.92, 0.08), primaryMat);
+    cape.position.set(0, 1.05, -0.28);
+    cape.rotation.x = 0.14;
+    const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.15, 0), visorMat);
+    orb.position.set(0.45, 1.72, -0.22);
+    bodyGroup.add(cape, orb);
+  } else if (!isNpc && skinCfg.headgearStyle === 'astro_helm') {
+    const thrusterGeo = new THREE.CylinderGeometry(0.13, 0.16, 0.56, 10);
+    const tL = new THREE.Mesh(thrusterGeo, whiteMat);
+    tL.position.set(-0.18, 1.2, -0.34);
+    const tR = new THREE.Mesh(thrusterGeo, whiteMat);
+    tR.position.set(0.18, 1.2, -0.34);
+    const flameGeo = new THREE.ConeGeometry(0.1, 0.24, 8);
+    const fL = new THREE.Mesh(flameGeo, visorMat);
+    fL.rotation.x = Math.PI;
+    fL.position.set(-0.18, 0.84, -0.34);
+    const fR = new THREE.Mesh(flameGeo, visorMat);
+    fR.rotation.x = Math.PI;
+    fR.position.set(0.18, 0.84, -0.34);
+    bodyGroup.add(tL, tR, fL, fR);
+  } else if (!isNpc && skinCfg.headgearStyle === 'headband') {
+    const scarf = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.18, 0.54), accentMat);
+    scarf.position.set(0, 1.54, 0);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.96, 0.12), visorMat);
+    blade.position.set(0, 1.32, -0.3);
+    blade.rotation.z = -0.55;
+    bodyGroup.add(scarf, blade);
+  } else {
+    const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.6, 0.24), darkMat);
+    backpack.position.set(0, 1.18, -0.32);
+    backpack.castShadow = true;
+    bodyGroup.add(backpack);
+  }
 
   // Arms (pivot at shoulder y = 1.52)
   const armGeo = new THREE.BoxGeometry(0.24, 0.68, 0.24);
   const leftArm = new THREE.Group();
   leftArm.position.set(-0.52, 1.52, 0);
-  const lArmMesh = new THREE.Mesh(armGeo, primaryMat);
+  const lArmMesh = new THREE.Mesh(armGeo, torsoMat);
   lArmMesh.position.y = -0.3;
   lArmMesh.castShadow = true;
   leftArm.add(lArmMesh);
 
   const rightArm = new THREE.Group();
   rightArm.position.set(0.52, 1.52, 0);
-  const rArmMesh = new THREE.Mesh(armGeo, primaryMat);
+  const rArmMesh = new THREE.Mesh(armGeo, torsoMat);
   rArmMesh.position.y = -0.3;
   rArmMesh.castShadow = true;
   rightArm.add(rArmMesh);
@@ -195,11 +267,60 @@ export function buildCompositeAvatar(primaryColor: string, accentColor = '#F59E0
     lEye.position.set(-0.14, 0.04, 0.31);
     const rEye = new THREE.Mesh(eyeGeo, darkMat);
     rEye.position.set(0.14, 0.04, 0.31);
-    const capBrim = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.08, 0.74), accentMat);
-    capBrim.position.set(0, 0.26, 0.08);
-    const capCrown = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.2, 0.64), primaryMat);
-    capCrown.position.set(0, 0.36, 0);
-    head.add(lEye, rEye, capBrim, capCrown);
+    head.add(lEye, rEye);
+
+    if (skinCfg.headgearStyle === 'cyber_helm') {
+      const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.34, 0.68), primaryMat);
+      helmet.position.set(0, 0.2, 0);
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.18, 0.1), visorMat);
+      visor.position.set(0, 0.04, 0.31);
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.26, 0.48), accentMat);
+      fin.position.set(0, 0.44, -0.02);
+      head.add(helmet, visor, fin);
+    } else if (skinCfg.headgearStyle === 'goggles') {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.14, 0.66), darkMat);
+      band.position.set(0, 0.12, 0);
+      const goggleL = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.1, 12), visorMat);
+      goggleL.rotation.x = Math.PI / 2;
+      goggleL.position.set(-0.15, 0.12, 0.33);
+      const goggleR = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.1, 12), visorMat);
+      goggleR.rotation.x = Math.PI / 2;
+      goggleR.position.set(0.15, 0.12, 0.33);
+      head.add(band, goggleL, goggleR);
+    } else if (skinCfg.headgearStyle === 'wizard_hat') {
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.64, 0.08, 12), primaryMat);
+      brim.position.set(0, 0.3, 0);
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.4, 0.1, 10), accentMat);
+      band.position.set(0, 0.38, 0);
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.68, 10), primaryMat);
+      cone.position.set(0, 0.72, -0.04);
+      cone.rotation.x = -0.14;
+      head.add(brim, band, cone);
+    } else if (skinCfg.headgearStyle === 'astro_helm') {
+      const shell = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.72, 0.74), whiteMat);
+      shell.position.set(0, 0.04, -0.02);
+      const domeVisor = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.36, 0.12), visorMat);
+      domeVisor.position.set(0, 0.04, 0.34);
+      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.25, 8), accentMat);
+      antenna.position.set(0.36, 0.38, 0);
+      head.add(shell, domeVisor, antenna);
+    } else if (skinCfg.headgearStyle === 'headband') {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.16, 0.66), accentMat);
+      band.position.set(0, 0.18, 0);
+      const tailL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.36, 0.06), accentMat);
+      tailL.position.set(-0.1, 0.1, -0.38);
+      tailL.rotation.x = 0.45;
+      const tailR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.28, 0.06), accentMat);
+      tailR.position.set(0.12, 0.12, -0.38);
+      tailR.rotation.x = 0.35;
+      head.add(band, tailL, tailR);
+    } else {
+      const capBrim = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.08, 0.74), accentMat);
+      capBrim.position.set(0, 0.26, 0.08);
+      const capCrown = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.2, 0.64), primaryMat);
+      capCrown.position.set(0, 0.36, 0);
+      head.add(capBrim, capCrown);
+    }
   }
   bodyGroup.add(head);
 
@@ -436,33 +557,52 @@ export function buildChallengeArenaLandmark(): THREE.Group {
 }
 
 /**
- * Generates a vibrant atmospheric sky dome texture (deep azure zenith -> warm sunlit horizon).
+ * Generates a vibrant atmospheric sky dome texture tailored to the chosen Arena Theme.
  */
-export function createSkyDomeTexture(): THREE.CanvasTexture {
+export function createSkyDomeTexture(theme?: ArenaThemeConfig): THREE.CanvasTexture {
+  const arena = theme ?? getArenaTheme('akademi_langit');
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext('2d')!;
 
   const grad = ctx.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0.0, '#0f172a');
-  grad.addColorStop(0.24, '#1d4ed8');
-  grad.addColorStop(0.48, '#38bdf8');
-  grad.addColorStop(0.66, '#bae6fd');
-  grad.addColorStop(0.8, '#fde68a');
-  grad.addColorStop(1.0, '#0284c7');
+  grad.addColorStop(0.0, arena.skyTop);
+  grad.addColorStop(0.28, arena.skyMid);
+  grad.addColorStop(0.58, arena.skyHorizon);
+  grad.addColorStop(0.84, arena.skyBottom);
+  grad.addColorStop(1.0, arena.skyTop);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 512, 512);
 
-  // Soft horizon cloud streaks
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
-  for (let i = 0; i < 14; i++) {
-    const x = (i * 83) % 512;
-    const y = 240 + ((i * 29) % 70);
-    const w = 90 + (i % 4) * 35;
-    ctx.beginPath();
-    ctx.ellipse(x, y, w, 12 + (i % 3) * 5, 0, 0, Math.PI * 2);
-    ctx.fill();
+  if (arena.isSpaceArena || arena.id === 'cyber_lab') {
+    // Starfield & Aurora bands
+    ctx.fillStyle = 'rgba(248, 250, 252, 0.8)';
+    for (let i = 0; i < 110; i++) {
+      const sx = (i * 73 + 17) % 512;
+      const sy = (i * 47 + 9) % 320;
+      const r = (i % 3 === 0 ? 1.8 : 1.0);
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = arena.id === 'cyber_lab' ? 'rgba(34, 211, 238, 0.14)' : 'rgba(167, 139, 250, 0.16)';
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath();
+      ctx.ellipse(90 + i * 75, 190 + (i % 3) * 28, 120, 14, 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    // Soft horizon cloud/ember streaks
+    ctx.fillStyle = arena.id === 'lembah_vulcano' ? 'rgba(251, 146, 60, 0.22)' : 'rgba(255, 255, 255, 0.18)';
+    for (let i = 0; i < 14; i++) {
+      const x = (i * 83) % 512;
+      const y = 240 + ((i * 29) % 70);
+      const w = 90 + (i % 4) * 35;
+      ctx.beginPath();
+      ctx.ellipse(x, y, w, 12 + (i % 3) * 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   const tex = new THREE.CanvasTexture(canvas);

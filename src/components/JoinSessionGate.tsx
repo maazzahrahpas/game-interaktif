@@ -1,6 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, AlertTriangle, CheckCircle2, Clock, Gamepad2, Loader2, ShieldCheck } from 'lucide-react';
-import type { Classroom, GameSession, LeaderboardEntry, StudentProgress, StudentQuestion } from '../types/eduverse.ts';
+import type {
+  ArenaThemeId,
+  CharacterSkinId,
+  Classroom,
+  GameSession,
+  LeaderboardEntry,
+  StudentProgress,
+  StudentQuestion,
+} from '../types/eduverse.ts';
+import {
+  DEFAULT_ARENA_ID,
+  DEFAULT_SKIN_ID,
+  getArenaTheme,
+  resolveArenaIdFromSession,
+} from '../game/gameCatalog.ts';
+import { ArenaSkinSelector } from './ArenaSkinSelector.tsx';
 import { EduverseCrest } from './LandingPage.tsx';
 
 export interface JoinedSessionPayload {
@@ -12,28 +27,29 @@ export interface JoinedSessionPayload {
   studentId: string;
   studentName: string;
   avatarColor: string;
+  skinId?: CharacterSkinId;
+  arenaIdOverride?: ArenaThemeId;
+  openQuizOnStart?: boolean;
 }
 
 interface JoinSessionGateProps {
   joinCode: string;
   defaultStudentName?: string;
   defaultStudentId?: string;
+  defaultSkinId?: CharacterSkinId;
+  defaultAvatarColor?: string;
+  defaultArenaId?: ArenaThemeId;
   onBack: () => void;
   onJoinedSuccess: (payload: JoinedSessionPayload) => void;
 }
-
-const AVATAR_COLORS = [
-  { label: 'Biru Akademi', hex: '#2563EB' },
-  { label: 'Zamrud', hex: '#10B981' },
-  { label: 'Sian Sains', hex: '#0891B2' },
-  { label: 'Oranye Energi', hex: '#EA580C' },
-  { label: 'Ungu Kosmik', hex: '#7C3AED' },
-];
 
 export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
   joinCode,
   defaultStudentName = '',
   defaultStudentId,
+  defaultSkinId = DEFAULT_SKIN_ID,
+  defaultAvatarColor = '#2563EB',
+  defaultArenaId = DEFAULT_ARENA_ID,
   onBack,
   onJoinedSuccess,
 }) => {
@@ -49,7 +65,9 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
 
   const [studentName, setStudentName] = useState(defaultStudentName);
   const [studentIdentity, setStudentIdentity] = useState('');
-  const [avatarColor, setAvatarColor] = useState('#2563EB');
+  const [avatarColor, setAvatarColor] = useState(defaultAvatarColor);
+  const [skinId, setSkinId] = useState<CharacterSkinId>(defaultSkinId);
+  const [arenaId, setArenaId] = useState<ArenaThemeId>(defaultArenaId);
   const [formError, setFormError] = useState('');
 
   useEffect(() => {
@@ -71,6 +89,7 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
             questions: data.questions,
             leaderboard: data.leaderboard || [],
           });
+          setArenaId(resolveArenaIdFromSession(data.session));
         }
       } catch {
         if (active) setErrorMsg('Gagal terhubung ke server validasi sesi.');
@@ -130,6 +149,8 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
         studentId: sid,
         studentName: studentName.trim(),
         avatarColor,
+        skinId,
+        arenaIdOverride: arenaId,
       });
     } catch {
       setFormError('Kesalahan jaringan saat mendaftar sesi.');
@@ -139,8 +160,8 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 bg-[radial-gradient(ellipse_at_top,_rgba(56,189,248,0.14),_transparent_60%)] text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
-      <div className="max-w-xl w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-7 sm:p-8 shadow-lg">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 bg-[radial-gradient(ellipse_at_top,_rgba(56,189,248,0.14),_transparent_60%)] text-slate-900 dark:text-slate-100 flex items-center justify-center p-4 sm:p-6">
+      <div className="max-w-2xl w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-lg">
         <div className="flex items-center justify-between gap-4">
           <button
             type="button"
@@ -190,7 +211,10 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
           <div className="mt-6">
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="w-4 h-4" />
-              <span>Tautan Sesi Aktif · Kode {sessionData.session.joinCode}</span>
+              <span>
+                Tautan Sesi Aktif · Kode {sessionData.session.joinCode} · Arena{' '}
+                {getArenaTheme(arenaId).name}
+              </span>
             </div>
             <h1 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">
               {sessionData.session.title}
@@ -214,69 +238,54 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
               </div>
             </div>
 
-            <form onSubmit={handleJoin} className="mt-6 space-y-4">
-              <div>
-                <label
-                  htmlFor="join-student-name"
-                  className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1.5"
-                >
-                  Nama Lengkap Siswa
-                </label>
-                <input
-                  id="join-student-name"
-                  type="text"
-                  required
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  placeholder="Contoh: Nadia Putri"
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            <form onSubmit={handleJoin} className="mt-6 space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="join-student-name"
+                    className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1.5"
+                  >
+                    Nama Lengkap Siswa
+                  </label>
+                  <input
+                    id="join-student-name"
+                    type="text"
+                    required
+                    value={studentName}
+                    onChange={(e) => setStudentName(e.target.value)}
+                    placeholder="Contoh: Nadia Putri"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
 
-              <div>
-                <label
-                  htmlFor="join-student-identity"
-                  className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1.5"
-                >
-                  NIS / Kelas {sessionData.session.requireIdentity ? '(Wajib)' : '(Opsional)'}
-                </label>
-                <input
-                  id="join-student-identity"
-                  type="text"
-                  required={sessionData.session.requireIdentity}
-                  value={studentIdentity}
-                  onChange={(e) => setStudentIdentity(e.target.value)}
-                  placeholder="Contoh: 20261104 / XI IPA 1"
-                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <span className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">
-                  Pilih Warna Avatar 3D
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {AVATAR_COLORS.map((c) => (
-                    <button
-                      key={c.hex}
-                      type="button"
-                      onClick={() => setAvatarColor(c.hex)}
-                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors ${
-                        avatarColor === c.hex
-                          ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-sky-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <span
-                        className="w-3.5 h-3.5 rounded-full"
-                        style={{ backgroundColor: c.hex }}
-                        aria-hidden="true"
-                      />
-                      {c.label}
-                    </button>
-                  ))}
+                <div>
+                  <label
+                    htmlFor="join-student-identity"
+                    className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1.5"
+                  >
+                    NIS / Kelas {sessionData.session.requireIdentity ? '(Wajib)' : '(Opsional)'}
+                  </label>
+                  <input
+                    id="join-student-identity"
+                    type="text"
+                    required={sessionData.session.requireIdentity}
+                    value={studentIdentity}
+                    onChange={(e) => setStudentIdentity(e.target.value)}
+                    placeholder="Contoh: 20261104 / XI IPA 1"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
+
+              <ArenaSkinSelector
+                compact
+                selectedArenaId={arenaId}
+                onSelectArena={setArenaId}
+                selectedSkinId={skinId}
+                onSelectSkin={setSkinId}
+                avatarColor={avatarColor}
+                onSelectColor={setAvatarColor}
+              />
 
               {formError && (
                 <p role="alert" className="text-sm font-medium text-rose-600 dark:text-rose-400">

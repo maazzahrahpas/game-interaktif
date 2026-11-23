@@ -1,8 +1,20 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import type { AnimState, PlayerAvatarState, WorldZoneId } from '../types/eduverse.ts';
+import type {
+  AnimState,
+  ArenaThemeId,
+  CharacterSkinId,
+  PlayerAvatarState,
+  WorldZoneId,
+} from '../types/eduverse.ts';
 import { WORLD_ZONES } from '../utils/gameRules.ts';
 import { audioSynth } from './audioSynth.ts';
+import {
+  DEFAULT_ARENA_ID,
+  DEFAULT_SKIN_ID,
+  getArenaTheme,
+  type RadarBlipTarget,
+} from './gameCatalog.ts';
 import { computePinchZoomDistance } from './touchControls.ts';
 import {
   buildAcademyLandmark,
@@ -45,6 +57,7 @@ export interface WorldCallbacks {
   onHazardHit?: (reason: string) => void;
   onNearHazardChange?: (near: boolean) => void;
   onDashStaminaChange?: (percent: number) => void;
+  onRadarUpdate?: (blips: RadarBlipTarget[]) => void;
   onLocalMoveBroadcast?: (state: {
     x: number;
     y: number;
@@ -123,6 +136,9 @@ interface RemoteAvatarEntry {
   targetRotY: number;
   animState: AnimState;
   walkPhase: number;
+  avatarColor: string;
+  skinId: CharacterSkinId;
+  displayName: string;
 }
 
 export class EduverseWorldEngine {
@@ -139,6 +155,16 @@ export class EduverseWorldEngine {
   private paused = false;
   private lastTime = performance.now();
   private elapsed = 0;
+
+  private arenaId: ArenaThemeId;
+  private skinId: CharacterSkinId;
+  private avatarColor: string;
+  private playerName: string;
+  private envGroup: THREE.Group;
+  private hemiLight!: THREE.HemisphereLight;
+  private keyLight!: THREE.DirectionalLight;
+  private rimLight!: THREE.DirectionalLight;
+  private orbitalRingMesh: THREE.Mesh | null = null;
 
   private waterTex: THREE.CanvasTexture | null = null;
   private playerRig: AvatarRig;
@@ -165,12 +191,17 @@ export class EduverseWorldEngine {
   private camYaw = 0;
   private camPitch = 0.34;
   private camDistance = 10.5;
+  private cameraSensitivity = 1.0;
+  private autoFollowCamera = false;
   private activeCanvasPointers = new Map<number, { x: number; y: number }>();
   private lastPinchSpan = 0;
 
   private keys = new Set<string>();
   private virtualMove = { x: 0, y: 0 };
   private virtualSprint = false;
+  private gamepadJumpLatch = false;
+  private gamepadInteractLatch = false;
+  private gamepadDashLatch = false;
 
   private obstacles: ObstacleCircle[] = [];
   private platforms: PlatformBox[] = [];
@@ -184,6 +215,7 @@ export class EduverseWorldEngine {
   }> = [];
   private gates: GateMesh[] = [];
   private crystals: CrystalItem[] = [];
+  private collectedCrystalIds = new Set<string>();
   private remoteAvatars = new Map<string, RemoteAvatarEntry>();
 
   // Zero-GC Pooled Particle System
@@ -205,6 +237,7 @@ export class EduverseWorldEngine {
   private unlockedZones = new Set<WorldZoneId>(['sekolah', 'taman']);
   private completedZones = new Set<WorldZoneId>();
   private lastBroadcastTime = 0;
+  private lastRadarTime = 0;
   private resizeObserver: ResizeObserver;
 
   constructor(
@@ -213,11 +246,21 @@ export class EduverseWorldEngine {
       mode: 'tour' | 'playing';
       playerName?: string;
       avatarColor?: string;
+      skinId?: CharacterSkinId;
+      arenaId?: ArenaThemeId;
+      cameraSensitivity?: number;
+      autoFollowCamera?: boolean;
       callbacks?: WorldCallbacks;
     }
   ) {
     this.container = container;
     this.mode = options.mode;
+    this.arenaId = options.arenaId || DEFAULT_ARENA_ID;
+    this.skinId = options.skinId || DEFAULT_SKIN_ID;
+    this.avatarColor = options.avatarColor || '#2563EB';
+    this.playerName = options.playerName || 'Kamu';
+    this.cameraSensitivity = options.cameraSensitivity ?? 1.0;
+    this.autoFollowCamera = options.autoFollowCamera ?? false;
     this.callbacks = options.callbacks || {};
 
     this.isSoftwareGl = (() => {
@@ -255,8 +298,11 @@ export class EduverseWorldEngine {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x7dd3fc);
-    this.scene.fog = new THREE.FogExp2(0xbae6fd, 0.0038);
+    const initTheme = getArenaTheme(this.arenaId);
+    this.scene.background = new THREE.Color(initTheme.fogHex);
+    this.scene.fog = new THREE.FogExp2(initTheme.fogHex, initTheme.fogDensity);
+    this.envGroup = new THREE.Group();
+    this.scene.add(this.envGroup);
 
     this.camera = new THREE.PerspectiveCamera(58, width / height, 0.1, 320);
 
@@ -268,9 +314,9 @@ export class EduverseWorldEngine {
     this.buildWorldEnvironment();
     this.initParticlePool();
 
-    this.playerRig = buildCompositeAvatar(options.avatarColor || '#2563EB', '#F59E0B', false);
-    const nameplate = createNameplateSprite(options.playerName || 'Kamu', '#38BDF8');
-    nameplate.position.y = 2.52;
+    this.playerRig = buildCompositeAvatar(this.avatarColor, '#F59E0B', false, this.skinId);
+    const nameplate = createNameplateSprite(this.playerName, '#38BDF8');
+    nameplate.position.y = 2.58;
     nameplate.scale.set(2.8, 0.6, 1);
     this.playerRig.root.add(nameplate);
     this.playerRig.root.position.copy(this.playerPos);
@@ -291,28 +337,46 @@ export class EduverseWorldEngine {
   }
 
   private setupLighting() {
-    const hemi = new THREE.HemisphereLight(0xe0f2fe, 0x166534, 0.7);
-    this.scene.add(hemi);
+    const theme = getArenaTheme(this.arenaId);
+    this.hemiLight = new THREE.HemisphereLight(theme.hemiSkyHex, theme.hemiGroundHex, 0.72);
+    this.scene.add(this.hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xfff4d6, 1.5);
-    keyLight.position.set(36, 48, 32);
+    this.keyLight = new THREE.DirectionalLight(theme.keyLightHex, 1.5);
+    this.keyLight.position.set(36, 48, 32);
     if (!this.isSoftwareGl) {
-      keyLight.castShadow = true;
-      keyLight.shadow.mapSize.set(1024, 1024);
-      keyLight.shadow.camera.left = -52;
-      keyLight.shadow.camera.right = 52;
-      keyLight.shadow.camera.top = 52;
-      keyLight.shadow.camera.bottom = -52;
-      keyLight.shadow.camera.near = 5;
-      keyLight.shadow.camera.far = 140;
-      keyLight.shadow.bias = -0.0005;
-      keyLight.shadow.normalBias = 0.02;
+      this.keyLight.castShadow = true;
+      this.keyLight.shadow.mapSize.set(1024, 1024);
+      this.keyLight.shadow.camera.left = -52;
+      this.keyLight.shadow.camera.right = 52;
+      this.keyLight.shadow.camera.top = 52;
+      this.keyLight.shadow.camera.bottom = -52;
+      this.keyLight.shadow.camera.near = 5;
+      this.keyLight.shadow.camera.far = 140;
+      this.keyLight.shadow.bias = -0.0005;
+      this.keyLight.shadow.normalBias = 0.02;
     }
-    this.scene.add(keyLight);
+    this.scene.add(this.keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x93c5fd, 0.5);
-    rimLight.position.set(-30, 22, -35);
-    this.scene.add(rimLight);
+    this.rimLight = new THREE.DirectionalLight(theme.rimLightHex, 0.55);
+    this.rimLight.position.set(-30, 22, -35);
+    this.scene.add(this.rimLight);
+  }
+
+  private disposeGroupResources(group: THREE.Object3D) {
+    group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.InstancedMesh) {
+        obj.geometry.dispose();
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach((m) => {
+          const std = m as THREE.MeshStandardMaterial;
+          std.map?.dispose();
+          m.dispose();
+        });
+      } else if (obj instanceof THREE.Sprite) {
+        obj.material.map?.dispose();
+        obj.material.dispose();
+      }
+    });
   }
 
   private initParticlePool() {
@@ -361,23 +425,66 @@ export class EduverseWorldEngine {
   }
 
   private buildWorldEnvironment() {
+    const theme = getArenaTheme(this.arenaId);
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
 
+    // Sync scene atmosphere & lights
+    this.scene.background = new THREE.Color(theme.fogHex);
+    this.scene.fog = new THREE.FogExp2(theme.fogHex, theme.fogDensity);
+    this.hemiLight.color.setHex(theme.hemiSkyHex);
+    this.hemiLight.groundColor.setHex(theme.hemiGroundHex);
+    this.keyLight.color.setHex(theme.keyLightHex);
+    this.rimLight.color.setHex(theme.rimLightHex);
+    this.orbitalRingMesh = null;
+
     // Gradient Atmospheric Sky Dome
-    const skyTex = createSkyDomeTexture();
+    const skyTex = createSkyDomeTexture(theme);
     const skyDome = new THREE.Mesh(
       new THREE.SphereGeometry(205, 24, 16),
       new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })
     );
-    this.scene.add(skyDome);
+    this.envGroup.add(skyDome);
 
-    const grassTex = createCanvasTexture(
+    const groundTex = createCanvasTexture(
       (ctx, s) => {
-        ctx.fillStyle = '#22c55e';
+        ctx.fillStyle = theme.groundPrimary;
         ctx.fillRect(0, 0, s, s);
-        for (let i = 0; i < 600; i++) {
-          ctx.fillStyle = i % 3 === 0 ? '#16a34a' : i % 3 === 1 ? '#15803d' : '#4ade80';
-          ctx.fillRect((i * 37) % s, (i * 53) % s, 8, 8);
+        if (theme.id === 'cyber_lab') {
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.28)';
+          ctx.lineWidth = 2;
+          for (let g = 0; g < s; g += 32) {
+            ctx.beginPath();
+            ctx.moveTo(g, 0);
+            ctx.lineTo(g, s);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, g);
+            ctx.lineTo(s, g);
+            ctx.stroke();
+          }
+          ctx.fillStyle = 'rgba(192, 132, 252, 0.25)';
+          for (let i = 0; i < 64; i += 32) {
+            ctx.fillRect(i * 4, (i * 2) % s, 6, 6);
+          }
+        } else if (theme.id === 'lembah_vulcano') {
+          for (let i = 0; i < 420; i++) {
+            ctx.fillStyle = i % 5 === 0 ? theme.groundAccent : theme.groundSecondary;
+            ctx.fillRect((i * 41) % s, (i * 61) % s, i % 5 === 0 ? 5 : 9, i % 5 === 0 ? 3 : 9);
+          }
+        } else if (theme.id === 'stasiun_kosmik') {
+          ctx.strokeStyle = 'rgba(167, 139, 250, 0.3)';
+          ctx.lineWidth = 3;
+          for (let g = 0; g < s; g += 64) {
+            ctx.strokeRect(g + 2, 2, 60, 60);
+            ctx.strokeRect(g + 2, 66, 60, 60);
+            ctx.strokeRect(g + 2, 130, 60, 60);
+            ctx.strokeRect(g + 2, 194, 60, 60);
+          }
+        } else {
+          for (let i = 0; i < 600; i++) {
+            ctx.fillStyle = i % 3 === 0 ? theme.groundSecondary : i % 3 === 1 ? '#15803d' : theme.groundAccent;
+            ctx.fillRect((i * 37) % s, (i * 53) % s, 8, 8);
+          }
         }
       },
       256,
@@ -388,9 +495,9 @@ export class EduverseWorldEngine {
 
     const stoneTex = createCanvasTexture(
       (ctx, s) => {
-        ctx.fillStyle = '#e7e5e4';
+        ctx.fillStyle = theme.pathBase;
         ctx.fillRect(0, 0, s, s);
-        ctx.strokeStyle = '#a8a29e';
+        ctx.strokeStyle = theme.pathLine;
         ctx.lineWidth = 4;
         for (let y = 0; y < s; y += 32) {
           ctx.beginPath();
@@ -413,9 +520,9 @@ export class EduverseWorldEngine {
 
     this.waterTex = createCanvasTexture(
       (ctx, s) => {
-        ctx.fillStyle = '#0284c7';
+        ctx.fillStyle = theme.waterBase;
         ctx.fillRect(0, 0, s, s);
-        ctx.strokeStyle = 'rgba(186, 230, 253, 0.28)';
+        ctx.strokeStyle = theme.waterWave;
         ctx.lineWidth = 3;
         for (let y = 16; y < s; y += 32) {
           ctx.beginPath();
@@ -432,12 +539,14 @@ export class EduverseWorldEngine {
       maxAniso
     );
 
-    // Shimmering Ocean Perimeter
+    // Shimmering Ocean / Magma / Cyber Grid / Void Perimeter
     const water = new THREE.Mesh(
       new THREE.PlaneGeometry(420, 420),
       new THREE.MeshStandardMaterial({
         color: 0xffffff,
         map: this.waterTex,
+        emissive: theme.id === 'lembah_vulcano' ? 0x7c2d12 : 0x000000,
+        emissiveIntensity: theme.id === 'lembah_vulcano' ? 0.55 : 0,
         roughness: 0.2,
         metalness: 0.25,
         envMapIntensity: 0.55,
@@ -445,11 +554,20 @@ export class EduverseWorldEngine {
     );
     water.rotation.x = -Math.PI / 2;
     water.position.y = -0.75;
-    this.scene.add(water);
+    this.envGroup.add(water);
 
     // Distant Horizon Archipelago Silhouette Peaks (InstancedMesh)
-    const peakGeo = new THREE.ConeGeometry(16, 26, 6);
-    const peakMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9, envMapIntensity: 0.1 });
+    const peakGeo =
+      theme.id === 'cyber_lab'
+        ? new THREE.BoxGeometry(14, 34, 14)
+        : new THREE.ConeGeometry(16, 26, theme.isSpaceArena ? 4 : 6);
+    const peakMat = new THREE.MeshStandardMaterial({
+      color: theme.peakHex,
+      emissive: theme.id === 'cyber_lab' ? 0x312e81 : theme.id === 'lembah_vulcano' ? 0x451a03 : 0x000000,
+      emissiveIntensity: 0.35,
+      roughness: 0.85,
+      envMapIntensity: 0.15,
+    });
     const peaks = new THREE.InstancedMesh(peakGeo, peakMat, 12);
     for (let i = 0; i < 12; i++) {
       const ang = (i / 12) * Math.PI * 2 + 0.2;
@@ -462,41 +580,60 @@ export class EduverseWorldEngine {
       peaks.setMatrixAt(i, _dummyMatrix);
     }
     peaks.computeBoundingSphere();
-    this.scene.add(peaks);
+    this.envGroup.add(peaks);
+
+    // Orbital Halo Ring for Space & Cyber Arenas
+    if (theme.isSpaceArena || theme.id === 'cyber_lab') {
+      const haloRing = new THREE.Mesh(
+        new THREE.TorusGeometry(62, 0.45, 10, 64),
+        new THREE.MeshStandardMaterial({
+          color: theme.trimHex,
+          emissive: theme.trimHex,
+          emissiveIntensity: 0.9,
+          roughness: 0.2,
+        })
+      );
+      haloRing.position.set(0, 24, -8);
+      haloRing.rotation.x = Math.PI * 0.42;
+      haloRing.rotation.y = 0.25;
+      this.envGroup.add(haloRing);
+      this.orbitalRingMesh = haloRing;
+    }
 
     // Main Eduverse Continent
     const continentBase = new THREE.Mesh(
       new THREE.CylinderGeometry(44, 48, 1.4, 36),
-      new THREE.MeshStandardMaterial({ color: 0x78716c, roughness: 0.9, envMapIntensity: 0.15 })
+      new THREE.MeshStandardMaterial({ color: theme.cliffHex, roughness: 0.88, envMapIntensity: 0.15 })
     );
     continentBase.position.y = -0.75;
-    this.scene.add(continentBase);
+    this.envGroup.add(continentBase);
 
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(43.5, 48),
       new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        map: grassTex,
-        roughness: 0.88,
-        envMapIntensity: 0.12,
+        map: groundTex,
+        roughness: theme.id === 'cyber_lab' || theme.isSpaceArena ? 0.52 : 0.88,
+        metalness: theme.isSpaceArena ? 0.22 : 0.04,
+        envMapIntensity: 0.15,
       })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = 0;
     ground.receiveShadow = true;
-    this.scene.add(ground);
+    this.envGroup.add(ground);
 
-    // Central Stone Plaza & Pathways
+    // Central Stone/Metal Plaza & Pathways
     const pathMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: stoneTex,
-      roughness: 0.82,
-      envMapIntensity: 0.15,
+      roughness: 0.78,
+      envMapIntensity: 0.18,
     });
     const centralPlaza = new THREE.Mesh(new THREE.CylinderGeometry(6.8, 7.2, 0.1, 24), pathMat);
     centralPlaza.position.set(0, 0.04, 10);
     centralPlaza.receiveShadow = true;
-    this.scene.add(centralPlaza);
+    this.envGroup.add(centralPlaza);
 
     const pathSegments: Array<[number, number, number, number, number]> = [
       [0, 12, 3.6, 22, 0],
@@ -510,7 +647,7 @@ export class EduverseWorldEngine {
       p.position.set(x, 0.03, z);
       p.rotation.y = rot;
       p.receiveShadow = true;
-      this.scene.add(p);
+      this.envGroup.add(p);
     });
 
     // Cyber-Academic Lamp Posts framing the outer plaza rim & avenues
@@ -523,47 +660,50 @@ export class EduverseWorldEngine {
       [13, 10, Math.PI - 0.3],
     ];
     lampCoords.forEach(([lx, lz, rot]) => {
-      const lamp = buildLampPost(0xfde047);
+      const lamp = buildLampPost(theme.trimHex);
       lamp.position.set(lx, 0, lz);
       lamp.rotation.y = rot;
-      this.scene.add(lamp);
+      this.envGroup.add(lamp);
     });
 
-    // Wooden Bridge to Knowledge Island
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.75 });
-    const bridgeDeck = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.35, 16), woodMat);
+    // Bridge to Knowledge Island
+    const bridgeMat = new THREE.MeshStandardMaterial({
+      color: theme.id === 'akademi_langit' ? 0x92400e : theme.cliffHex,
+      roughness: 0.7,
+    });
+    const bridgeDeck = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.35, 16), bridgeMat);
     bridgeDeck.position.set(0, 0.16, -22);
     bridgeDeck.receiveShadow = true;
-    const railL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.0, 16), woodMat);
+    const railL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.0, 16), bridgeMat);
     railL.position.set(-2.1, 0.75, -22);
-    const railR = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.0, 16), woodMat);
+    const railR = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.0, 16), bridgeMat);
     railR.position.set(2.1, 0.75, -22);
-    this.scene.add(bridgeDeck, railL, railR);
+    this.envGroup.add(bridgeDeck, railL, railR);
 
     // 6 Iconic Landmarks
     const academy = buildAcademyLandmark(stoneTex);
     academy.position.set(0, 0, -2);
-    this.scene.add(academy);
+    this.envGroup.add(academy);
     this.obstacles.push({ x: 0, z: -2, r: 7.5 });
 
     const lab = buildScienceLabLandmark();
     lab.position.set(26, 0, -10);
-    this.scene.add(lab);
+    this.envGroup.add(lab);
     this.obstacles.push({ x: 26, z: -10, r: 6.2 });
 
     const library = buildLibraryLandmark();
     library.position.set(-26, 0, -16);
-    this.scene.add(library);
+    this.envGroup.add(library);
     this.obstacles.push({ x: -26, z: -16, r: 5.5 });
 
     const island = buildKnowledgeIslandLandmark();
     island.position.set(0, 0, -37);
-    this.scene.add(island);
+    this.envGroup.add(island);
     this.obstacles.push({ x: 3.5, z: -39, r: 2.5 });
 
     const arena = buildChallengeArenaLandmark();
     arena.position.set(28, 0, 22);
-    this.scene.add(arena);
+    this.envGroup.add(arena);
 
     const fountainBase = new THREE.Mesh(
       new THREE.CylinderGeometry(3.2, 3.6, 0.7, 16),
@@ -572,35 +712,64 @@ export class EduverseWorldEngine {
     fountainBase.position.set(-22, 0.35, 16);
     const fountainWater = new THREE.Mesh(
       new THREE.CylinderGeometry(2.7, 2.7, 0.75, 16),
-      new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.15, metalness: 0.2 })
+      new THREE.MeshStandardMaterial({
+        color: theme.trimHex,
+        emissive: theme.trimHex,
+        emissiveIntensity: theme.id === 'akademi_langit' ? 0.1 : 0.45,
+        roughness: 0.15,
+        metalness: 0.2,
+      })
     );
     fountainWater.position.set(-22, 0.38, 16);
     const fountainSpire = new THREE.Mesh(
       new THREE.ConeGeometry(0.6, 2.4, 8),
-      new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.35 })
+      new THREE.MeshStandardMaterial({ color: theme.hazardAccentHex, roughness: 0.35 })
     );
     fountainSpire.position.set(-22, 1.6, 16);
-    this.scene.add(fountainBase, fountainWater, fountainSpire);
+    this.envGroup.add(fountainBase, fountainWater, fountainSpire);
     this.obstacles.push({ x: -22, z: 16, r: 3.4 });
 
-    // Instanced Trees (24 trees)
+    // Instanced Flora / Energy Pylons (24 entries tailored by Arena theme)
     const treePositions: Array<[number, number]> = [
       [-32, 6], [-35, 18], [-28, 28], [-16, 32], [-12, 20], [-29, -4],
       [34, 6], [36, -18], [16, 34], [14, -14], [-14, -12], [-34, -26],
       [-20, -28], [18, -26], [35, 14], [12, 28], [-8, 35], [8, 36],
       [-37, -10], [38, -2], [-25, 24], [24, -24], [-6, -42], [6, -42],
     ];
-    const trunkGeo = new THREE.CylinderGeometry(0.35, 0.5, 2.4, 8);
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 });
-    const canopyGeo = new THREE.DodecahedronGeometry(1.9, 0);
-    const canopyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72 });
+    const trunkGeo =
+      theme.id === 'akademi_langit'
+        ? new THREE.CylinderGeometry(0.35, 0.5, 2.4, 8)
+        : new THREE.CylinderGeometry(0.28, 0.42, 2.8, 6);
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: theme.id === 'akademi_langit' ? 0x78350f : 0x1e293b,
+      roughness: 0.75,
+    });
+    const canopyGeo =
+      theme.id === 'akademi_langit'
+        ? new THREE.DodecahedronGeometry(1.9, 0)
+        : theme.id === 'lembah_vulcano'
+        ? new THREE.ConeGeometry(1.4, 3.2, 5)
+        : new THREE.OctahedronGeometry(1.5, 0);
+    const canopyMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: theme.id === 'akademi_langit' ? 0x000000 : theme.trimHex,
+      emissiveIntensity: theme.id === 'akademi_langit' ? 0 : 0.25,
+      roughness: 0.58,
+    });
 
     const trunksInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treePositions.length);
     const canopiesInst = new THREE.InstancedMesh(canopyGeo, canopyMat, treePositions.length);
     trunksInst.castShadow = !this.isSoftwareGl;
     canopiesInst.castShadow = !this.isSoftwareGl;
 
-    const treePalette = [0x16a34a, 0x22c55e, 0x15803d, 0x10b981];
+    const paletteMap: Record<ArenaThemeId, number[]> = {
+      akademi_langit: [0x16a34a, 0x22c55e, 0x15803d, 0x10b981],
+      cyber_lab: [0x06b6d4, 0x3b82f6, 0x8b5cf6, 0x22d3ee],
+      lembah_vulcano: [0xea580c, 0xf97316, 0xdc2626, 0xf59e0b],
+      stasiun_kosmik: [0x8b5cf6, 0x6366f1, 0x38bdf8, 0xa855f7],
+    };
+    const treePalette = paletteMap[theme.id];
+
     treePositions.forEach(([tx, tz], i) => {
       const s = 0.85 + ((i * 19) % 30) / 100;
       _dummyPos.set(tx, 1.2 * s, tz);
@@ -617,11 +786,11 @@ export class EduverseWorldEngine {
     });
     trunksInst.computeBoundingSphere();
     canopiesInst.computeBoundingSphere();
-    this.scene.add(trunksInst, canopiesInst);
+    this.envGroup.add(trunksInst, canopiesInst);
 
     // Interactive NPCs at each of the 6 zones
     WORLD_ZONES.forEach((zone) => {
-      const rig = buildCompositeAvatar(zone.color, '#FDE047', true);
+      const rig = buildCompositeAvatar(zone.color, '#FDE047', true, 'explorer');
       rig.root.position.set(zone.position[0], 0, zone.position[2]);
       const label = createNameplateSprite(zone.npcName, zone.color, zone.name);
       label.position.y = 3.15;
@@ -637,7 +806,7 @@ export class EduverseWorldEngine {
       );
       halo.position.y = 3.95;
       rig.root.add(halo);
-      this.scene.add(rig.root);
+      this.envGroup.add(rig.root);
       this.npcEntries.push({ zone, rig, halo });
     });
 
@@ -649,6 +818,7 @@ export class EduverseWorldEngine {
       { zoneId: 'arena', x: 20, z: 17, rotY: -0.7, color: 0xef4444 },
     ];
     gateConfigs.forEach((g) => {
+      const unlocked = this.unlockedZones.has(g.zoneId);
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(4.6, 3.6, 0.45),
         new THREE.MeshStandardMaterial({
@@ -660,10 +830,11 @@ export class EduverseWorldEngine {
           roughness: 0.2,
         })
       );
-      mesh.position.set(g.x, 1.8, g.z);
+      mesh.position.set(g.x, unlocked ? -2.8 : 1.8, g.z);
+      mesh.visible = !unlocked;
       mesh.rotation.y = g.rotY;
-      this.scene.add(mesh);
-      this.gates.push({ zoneId: g.zoneId, mesh, lockedY: 1.8, unlocked: false });
+      this.envGroup.add(mesh);
+      this.gates.push({ zoneId: g.zoneId, mesh, lockedY: 1.8, unlocked });
     });
 
     // 5 Energy Jump Pads + Elevated Parkour Platforms holding Golden Chrono Crystals
@@ -687,24 +858,27 @@ export class EduverseWorldEngine {
     jumpPadData.forEach((jp, idx) => {
       const pad = buildJumpPad(jp.color);
       pad.root.position.set(jp.padX, 0, jp.padZ);
-      this.scene.add(pad.root);
+      this.envGroup.add(pad.root);
       this.jumpPads.push({ x: jp.padX, z: jp.padZ, ring: pad.ring, cooldown: 0 });
 
       const plat = buildFloatingPlatform(4.6, 4.6, jp.color);
       plat.position.set(jp.platX, jp.platY, jp.platZ);
-      this.scene.add(plat);
+      this.envGroup.add(plat);
       this.platforms.push({ x: jp.platX, y: jp.platY + 0.22, z: jp.platZ, halfW: 2.35, halfD: 2.35 });
 
+      const crystalId = `golden_chrono_${idx + 1}`;
+      const isCollected = this.collectedCrystalIds.has(crystalId);
       const goldMesh = new THREE.Mesh(goldenCrystalGeo, goldenCrystalMat);
       goldMesh.position.set(jp.platX, jp.platY + 1.4, jp.platZ);
-      this.scene.add(goldMesh);
+      goldMesh.visible = !isCollected;
+      this.envGroup.add(goldMesh);
       this.crystals.push({
-        id: `golden_chrono_${idx + 1}`,
+        id: crystalId,
         mesh: goldMesh,
         x: jp.platX,
         baseY: jp.platY + 1.4,
         z: jp.platZ,
-        collected: false,
+        collected: isCollected,
         isGolden: true,
       });
     });
@@ -716,28 +890,31 @@ export class EduverseWorldEngine {
     ];
     const crystalGeo = new THREE.OctahedronGeometry(0.55, 0);
     const crystalMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      emissive: 0x0ea5e9,
-      emissiveIntensity: 0.7,
+      color: theme.trimHex,
+      emissive: theme.trimHex,
+      emissiveIntensity: 0.75,
       roughness: 0.15,
       metalness: 0.5,
     });
     crystalCoords.forEach(([cx, cz], idx) => {
+      const crystalId = `crystal_${idx + 1}`;
+      const isCollected = this.collectedCrystalIds.has(crystalId);
       const mesh = new THREE.Mesh(crystalGeo, crystalMat);
       mesh.position.set(cx, 1.15, cz);
-      this.scene.add(mesh);
+      mesh.visible = !isCollected;
+      this.envGroup.add(mesh);
       this.crystals.push({
-        id: `crystal_${idx + 1}`,
+        id: crystalId,
         mesh,
         x: cx,
         baseY: 1.15,
         z: cz,
-        collected: false,
+        collected: isCollected,
         isGolden: false,
       });
     });
 
-    // 4 Patrolling Sentinel Drones (Fair challenge along outer approaches)
+    // 4 Patrolling Sentinel Drones (speed tuned per Arena challenge)
     const droneConfigs = [
       { cx: -14, cz: 10, rx: 4.5, rz: 3.5, speed: 0.95, phase: 0, color: 0xf97316 },
       { cx: 14, cz: -3, rx: 4.5, rz: 4.0, speed: 1.1, phase: 1.7, color: 0xef4444 },
@@ -747,14 +924,14 @@ export class EduverseWorldEngine {
     droneConfigs.forEach((dc) => {
       const rig = buildSentinelDrone(dc.color);
       rig.root.position.set(dc.cx, 0, dc.cz);
-      this.scene.add(rig.root);
+      this.envGroup.add(rig.root);
       this.drones.push({
         rig,
         centerX: dc.cx,
         centerZ: dc.cz,
         radiusX: dc.rx,
         radiusZ: dc.rz,
-        speed: dc.speed,
+        speed: dc.speed * theme.hazardSpeedMultiplier,
         phase: dc.phase,
         x: dc.cx,
         z: dc.cz,
@@ -764,7 +941,7 @@ export class EduverseWorldEngine {
       });
     });
 
-    // 2 Rotating Energy Laser Pylons (Jump over with Space or Dash through with Shift/Q!)
+    // 2 Rotating Energy Laser Pylons
     const laserConfigs = [
       { x: 0, z: -22, beamLength: 4.2, speed: 1.25 },
       { x: 28, z: 22, beamLength: 5.5, speed: 1.55 },
@@ -772,14 +949,14 @@ export class EduverseWorldEngine {
     laserConfigs.forEach((lc) => {
       const pylon = buildLaserPylon(lc.beamLength);
       pylon.root.position.set(lc.x, 0, lc.z);
-      this.scene.add(pylon.root);
+      this.envGroup.add(pylon.root);
       this.lasers.push({
         rotator: pylon.rotator,
         x: lc.x,
         z: lc.z,
         beamLength: lc.beamLength,
         angle: 0,
-        speed: lc.speed,
+        speed: lc.speed * theme.hazardSpeedMultiplier,
       });
     });
   }
@@ -869,9 +1046,14 @@ export class EduverseWorldEngine {
       return;
     }
 
-    const sensitivity = e.pointerType === 'touch' ? 0.0075 : 0.0065;
-    this.camYaw -= dx * sensitivity;
-    this.camPitch = THREE.MathUtils.clamp(this.camPitch + dy * 0.0048, 0.12, 1.05);
+    const baseSens = e.pointerType === 'touch' ? 0.0075 : 0.0065;
+    const sens = baseSens * this.cameraSensitivity;
+    this.camYaw -= dx * sens;
+    this.camPitch = THREE.MathUtils.clamp(
+      this.camPitch + dy * 0.0048 * this.cameraSensitivity,
+      0.12,
+      1.05
+    );
   };
 
   private handlePointerUp = (e: PointerEvent) => {
@@ -1010,15 +1192,89 @@ export class EduverseWorldEngine {
     this.callbacks.onZoneChange?.(zoneId);
   }
 
+  public setPlayerAppearance(
+    skinId: CharacterSkinId,
+    avatarColor: string,
+    playerName?: string
+  ) {
+    if (
+      this.skinId === skinId &&
+      this.avatarColor === avatarColor &&
+      (!playerName || this.playerName === playerName)
+    ) {
+      return;
+    }
+    this.skinId = skinId;
+    this.avatarColor = avatarColor;
+    if (playerName) this.playerName = playerName;
+
+    this.scene.remove(this.playerRig.root);
+    this.disposeGroupResources(this.playerRig.root);
+
+    this.playerRig = buildCompositeAvatar(this.avatarColor, '#F59E0B', false, this.skinId);
+    const nameplate = createNameplateSprite(this.playerName, '#38BDF8');
+    nameplate.position.y = 2.58;
+    nameplate.scale.set(2.8, 0.6, 1);
+    this.playerRig.root.add(nameplate);
+    this.playerRig.root.position.copy(this.playerPos);
+    this.playerRig.root.rotation.y = this.playerRotY;
+    this.playerRig.root.visible = this.mode === 'playing';
+    this.scene.add(this.playerRig.root);
+    this.spawnParticleBurst(this.playerPos.x, this.playerPos.y + 1.2, this.playerPos.z, 16, 0x38bdf8, 5.2);
+  }
+
+  public setArenaTheme(nextArenaId: ArenaThemeId) {
+    if (this.arenaId === nextArenaId) return;
+    this.arenaId = nextArenaId;
+
+    this.disposeGroupResources(this.envGroup);
+    this.envGroup.clear();
+    this.obstacles = [];
+    this.platforms = [];
+    this.jumpPads = [];
+    this.drones = [];
+    this.lasers = [];
+    this.npcEntries = [];
+    this.gates = [];
+    this.crystals = [];
+
+    this.buildWorldEnvironment();
+    this.spawnParticleBurst(this.playerPos.x, this.playerPos.y + 1.5, this.playerPos.z, 22, 0xfacc15, 6.5);
+  }
+
+  public setCameraOptions(opts: { sensitivity?: number; autoFollow?: boolean }) {
+    if (typeof opts.sensitivity === 'number') {
+      this.cameraSensitivity = THREE.MathUtils.clamp(opts.sensitivity, 0.4, 2.2);
+    }
+    if (typeof opts.autoFollow === 'boolean') {
+      this.autoFollowCamera = opts.autoFollow;
+    }
+  }
+
   public syncRemotePlayers(players: PlayerAvatarState[], localStudentId: string) {
     const activeIds = new Set<string>();
     for (const p of players) {
       if (p.studentId === localStudentId) continue;
       activeIds.add(p.studentId);
+      const nextSkin = p.skinId || 'explorer';
+      const nextColor = p.avatarColor || '#10B981';
       let entry = this.remoteAvatars.get(p.studentId);
+
+      if (
+        entry &&
+        (entry.skinId !== nextSkin ||
+          entry.avatarColor !== nextColor ||
+          entry.displayName !== p.displayName)
+      ) {
+        this.scene.remove(entry.rig.root);
+        this.disposeGroupResources(entry.rig.root);
+        this.remoteAvatars.delete(p.studentId);
+        entry = undefined;
+      }
+
       if (!entry) {
-        const rig = buildCompositeAvatar(p.avatarColor || '#10B981', '#F59E0B', false);
-        const tag = createNameplateSprite(p.displayName, p.avatarColor || '#10B981');
+        const rig = buildCompositeAvatar(nextColor, '#F59E0B', false, nextSkin);
+        const tag = createNameplateSprite(p.displayName, nextColor);
         tag.position.y = 2.65;
         rig.root.add(tag);
         rig.root.position.set(p.x, p.y, p.z);
@@ -1029,6 +1285,9 @@ export class EduverseWorldEngine {
           targetRotY: p.rotY,
           animState: p.animState,
           walkPhase: 0,
+          avatarColor: nextColor,
+          skinId: nextSkin,
+          displayName: p.displayName,
         };
         this.remoteAvatars.set(p.studentId, entry);
       } else {
@@ -1041,6 +1300,7 @@ export class EduverseWorldEngine {
     for (const [id, entry] of this.remoteAvatars.entries()) {
       if (!activeIds.has(id)) {
         this.scene.remove(entry.rig.root);
+        this.disposeGroupResources(entry.rig.root);
         this.remoteAvatars.delete(id);
       }
     }
@@ -1217,6 +1477,10 @@ export class EduverseWorldEngine {
       l.rotator.rotation.y = l.angle;
     }
 
+    if (this.orbitalRingMesh) {
+      this.orbitalRingMesh.rotation.z += dt * 0.12;
+    }
+
     // Interpolate Remote Players
     for (const remote of this.remoteAvatars.values()) {
       remote.rig.root.position.x = THREE.MathUtils.damp(remote.rig.root.position.x, remote.targetPos.x, 10, dt);
@@ -1261,7 +1525,7 @@ export class EduverseWorldEngine {
       this.callbacks.onDashStaminaChange?.(staminaPct);
     }
 
-    // Input & Camera-Relative Movement
+    // Input & Camera-Relative Movement (Keyboard + Touch Joystick + Optional Gamepad)
     let moveForward = 0;
     let moveRight = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) moveForward += 1;
@@ -1271,6 +1535,37 @@ export class EduverseWorldEngine {
 
     moveForward += this.virtualMove.y;
     moveRight += this.virtualMove.x;
+
+    let gamepadSprint = false;
+    try {
+      const pads = navigator.getGamepads?.();
+      const gp = pads?.[0];
+      if (gp && gp.connected) {
+        const lx = Math.abs(gp.axes[0] || 0) > 0.18 ? gp.axes[0] : 0;
+        const ly = Math.abs(gp.axes[1] || 0) > 0.18 ? gp.axes[1] : 0;
+        moveRight += lx;
+        moveForward -= ly;
+        const rx = Math.abs(gp.axes[2] || 0) > 0.2 ? gp.axes[2] : 0;
+        const ry = Math.abs(gp.axes[3] || 0) > 0.2 ? gp.axes[3] : 0;
+        if (rx !== 0) this.camYaw -= rx * 2.2 * this.cameraSensitivity * dt;
+        if (ry !== 0) this.camPitch = THREE.MathUtils.clamp(this.camPitch + ry * 1.4 * dt, 0.12, 1.05);
+
+        const jumpDown = Boolean(gp.buttons[0]?.pressed);
+        if (jumpDown && !this.gamepadJumpLatch) this.jumpBufferTimer = 0.14;
+        this.gamepadJumpLatch = jumpDown;
+
+        const dashDown = Boolean(gp.buttons[2]?.pressed || gp.buttons[5]?.pressed);
+        if (dashDown && !this.gamepadDashLatch) this.triggerDash();
+        this.gamepadDashLatch = dashDown;
+        gamepadSprint = Boolean(gp.buttons[4]?.pressed || gp.buttons[7]?.pressed);
+
+        const interactDown = Boolean(gp.buttons[3]?.pressed);
+        if (interactDown && !this.gamepadInteractLatch && this.nearestNpc) this.triggerInteract();
+        this.gamepadInteractLatch = interactDown;
+      }
+    } catch {
+      // Ignore Gamepad API restrictions
+    }
 
     _camForward.set(-Math.sin(this.camYaw), 0, -Math.cos(this.camYaw)).normalize();
     _camRight.set(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw)).normalize();
@@ -1284,9 +1579,17 @@ export class EduverseWorldEngine {
     const analogScale = isMoving ? Math.min(1, rawMag) : 0;
     const isDashing = this.dashTimer > 0;
     const isSprinting =
-      this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.virtualSprint;
+      this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.virtualSprint || gamepadSprint;
     const baseSpeed = isDashing ? 23.5 : isSprinting ? 14.5 : 9.4;
     const speed = isDashing ? baseSpeed : baseSpeed * analogScale;
+
+    if (this.autoFollowCamera && isMoving && this.activeCanvasPointers.size === 0) {
+      const targetYaw = this.playerRotY + Math.PI;
+      let yawDiff = targetYaw - this.camYaw;
+      while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+      while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+      this.camYaw += yawDiff * (1 - Math.exp(-2.8 * dt));
+    }
 
     if (isDashing && !isMoving) {
       // Dash in facing direction even if stationary
@@ -1505,6 +1808,7 @@ export class EduverseWorldEngine {
       const dz = this.playerPos.z - c.z;
       if (dx * dx + dy * dy + dz * dz < 3.8) {
         c.collected = true;
+        this.collectedCrystalIds.add(c.id);
         c.mesh.visible = false;
         audioSynth.playPickup(c.isGolden);
         this.spawnParticleBurst(
@@ -1549,6 +1853,57 @@ export class EduverseWorldEngine {
     if ((foundInteractNpc?.id || null) !== (this.nearestNpc?.id || null)) {
       this.nearestNpc = foundInteractNpc;
       this.callbacks.onNearNpcChange?.(foundInteractNpc);
+    }
+
+    // Throttled Radar / Compass Target Telemetry (~4.5Hz)
+    if (this.callbacks.onRadarUpdate && nowMs - this.lastRadarTime > 220) {
+      this.lastRadarTime = nowMs;
+      const blips: RadarBlipTarget[] = [];
+
+      let targetNpcZone = WORLD_ZONES.find(
+        (z) => this.unlockedZones.has(z.id) && !this.completedZones.has(z.id)
+      );
+      if (!targetNpcZone) {
+        targetNpcZone = WORLD_ZONES.find((z) => this.unlockedZones.has(z.id)) || WORLD_ZONES[0];
+      }
+      if (targetNpcZone) {
+        const dx = targetNpcZone.position[0] - this.playerPos.x;
+        const dz = targetNpcZone.position[2] - this.playerPos.z;
+        const fwdDot = dx * _camForward.x + dz * _camForward.z;
+        const rightDot = dx * _camRight.x + dz * _camRight.z;
+        blips.push({
+          zoneId: targetNpcZone.id,
+          label: targetNpcZone.npcName,
+          angleRad: Math.atan2(rightDot, fwdDot),
+          distanceMeters: Math.round(Math.hypot(dx, dz)),
+          type: 'npc',
+        });
+      }
+
+      let nearestGolden: CrystalItem | null = null;
+      let minGoldDist = Infinity;
+      for (const c of this.crystals) {
+        if (c.collected || !c.isGolden) continue;
+        const dist = Math.hypot(c.x - this.playerPos.x, c.z - this.playerPos.z);
+        if (dist < minGoldDist) {
+          minGoldDist = dist;
+          nearestGolden = c;
+        }
+      }
+      if (nearestGolden) {
+        const dx = nearestGolden.x - this.playerPos.x;
+        const dz = nearestGolden.z - this.playerPos.z;
+        const fwdDot = dx * _camForward.x + dz * _camForward.z;
+        const rightDot = dx * _camRight.x + dz * _camRight.z;
+        blips.push({
+          zoneId: this.activeZone,
+          label: 'Kristal Emas',
+          angleRad: Math.atan2(rightDot, fwdDot),
+          distanceMeters: Math.round(minGoldDist),
+          type: 'crystal',
+        });
+      }
+      this.callbacks.onRadarUpdate(blips);
     }
 
     // Throttled multiplayer broadcast (~10Hz max)

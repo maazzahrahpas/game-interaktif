@@ -1,3 +1,5 @@
+import type { DeviceProfile, TouchControlSize } from '../types/eduverse.ts';
+
 export interface VirtualJoystickVector {
   x: number;
   y: number;
@@ -84,8 +86,28 @@ export function computeVirtualJoystickVector(
 export function shouldAutoEnableTouchControls(input: TouchDetectionInput): boolean {
   if (input.hasCoarsePointer) return true;
   if (input.viewportWidth <= 820) return true;
-  if (input.maxTouchPoints > 0 && input.viewportWidth <= 1180) return true;
+  if (input.maxTouchPoints > 0 && input.viewportWidth <= 1280) return true;
   return false;
+}
+
+/**
+ * Classifies current viewport/device into phone, tablet, or desktop ergonomics profile.
+ */
+export function getDeviceProfile(input: TouchDetectionInput): DeviceProfile {
+  if (input.viewportWidth < 768) {
+    return 'phone';
+  }
+  if (input.viewportWidth <= 1279 || (input.hasCoarsePointer && input.viewportWidth <= 1366)) {
+    return 'tablet';
+  }
+  return 'desktop';
+}
+
+export function getTouchControlScaleValue(size: TouchControlSize, profile: DeviceProfile): number {
+  const base = profile === 'phone' ? 0.92 : profile === 'tablet' ? 1.08 : 1.0;
+  if (size === 'compact') return Number((base * 0.86).toFixed(2));
+  if (size === 'large') return Number((base * 1.16).toFixed(2));
+  return Number(base.toFixed(2));
 }
 
 /**
@@ -112,3 +134,4 @@ export function computePinchZoomDistance(
   const next = Math.min(maxDistance, Math.max(minDistance, currentDistance + delta));
   return Math.round(next * 1000) / 1000;
 }
+

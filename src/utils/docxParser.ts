@@ -209,10 +209,14 @@ export function parseQuestionsFromText(rawText: string): DocxParseResult {
   };
 }
 
-export async function extractDocxFile(file: File): Promise<DocxParseResult> {
-  const arrayBuffer = await file.arrayBuffer();
+export async function extractDocxArrayBuffer(arrayBuffer: ArrayBuffer): Promise<DocxParseResult> {
   const result = await mammoth.extractRawText({ arrayBuffer });
   return parseQuestionsFromText(result.value || '');
+}
+
+export async function extractDocxFile(file: File): Promise<DocxParseResult> {
+  const arrayBuffer = await file.arrayBuffer();
+  return extractDocxArrayBuffer(arrayBuffer);
 }
 
 export async function generateWordTemplateBlob(): Promise<Blob> {

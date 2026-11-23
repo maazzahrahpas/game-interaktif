@@ -7,9 +7,14 @@ import {
 interface VirtualJoystickProps {
   onMove: (dx: number, dy: number, isSprinting: boolean) => void;
   disabled?: boolean;
+  scaleMultiplier?: number;
 }
 
-export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, disabled = false }) => {
+export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({
+  onMove,
+  disabled = false,
+  scaleMultiplier = 1,
+}) => {
   const padRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
   const knobRef = useRef<HTMLDivElement | null>(null);
@@ -117,12 +122,15 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, disabl
     resetStick();
   };
 
+  const clampedScale = Math.max(0.8, Math.min(1.25, scaleMultiplier));
+
   return (
     <div
       ref={padRef}
       data-testid="virtual-joystick"
       role="application"
       aria-label="Analog Gerak 360 Derajat"
+      style={{ transform: `scale(${clampedScale})`, transformOrigin: 'bottom left' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUpOrCancel}

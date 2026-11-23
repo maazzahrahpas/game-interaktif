@@ -1,6 +1,12 @@
 import express from 'express';
 import { serverStore } from './store.ts';
 import {
+  createAdminSessionToken,
+  extractBearerToken,
+  revokeAdminSessionToken,
+  verifyAdminSessionToken,
+} from './adminAuth.ts';
+import {
   explainAnswerConcept,
   generateMissionPlan,
   generateQuestionVariations,
@@ -38,6 +44,121 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
   // ==================== REST API ROUTES ====================
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, service: 'EDUVERSE Server', timestamp: new Date().toISOString() });
+  });
+
+  // ==================== ADMIN AUTH ROUTES ====================
+  app.get('/api/admin/status', (_req, res) => {
+    return res.json({
+      ok: true,
+      ...serverStore.getAdminAuthStatus(),
+    });
+  });
+
+  app.post('/api/admin/setup', (req, res) => {
+    try {
+      const { password } = req.body || {};
+      const clean = String(password || '');
+      if (clean.length < 6) {
+        return res.status(400).json({ ok: false, error: 'Password admin minimal 6 karakter.' });
+      }
+      const setup = serverStore.setupInitialAdminPassword(clean);
+      if (!setup.ok) {
+        return res.status(setup.status).json({ ok: false, error: setup.error });
+      }
+      const sessionToken = createAdminSessionToken('admin_website');
+      return res.json({
+        ok: true,
+        token: sessionToken.token,
+        expiresAt: sessionToken.expiresAt,
+        source: 'stored',
+      });
+    } catch (err) {
+      return res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Gagal mengaktifkan password admin.',
+      });
+    }
+  });
+
+  app.post('/api/admin/login', (req, res) => {
+    const status = serverStore.getAdminAuthStatus();
+    if (status.needsSetup) {
+      return res.status(412).json({
+        ok: false,
+        needsSetup: true,
+        error: 'Password admin belum diaktifkan. Silakan atur password admin terlebih dahulu.',
+      });
+    }
+    const { password } = req.body || {};
+    if (!serverStore.verifyAdminLogin(String(password || ''))) {
+      serverStore.logAudit(
+        'anonymous',
+        'guru',
+        'ADMIN_LOGIN_FAILED',
+        'adminAuth',
+        'website_admin',
+        'Percobaan login Admin Website dengan password tidak valid.'
+      );
+      return res.status(401).json({ ok: false, error: 'Password admin salah.' });
+    }
+    const sessionToken = createAdminSessionToken('admin_website');
+    serverStore.logAudit(
+      'admin_website',
+      'super_admin',
+      'ADMIN_LOGIN_SUCCESS',
+      'adminAuth',
+      'website_admin',
+      'Admin Website berhasil masuk dengan verifikasi server.'
+    );
+    return res.json({
+      ok: true,
+      token: sessionToken.token,
+      expiresAt: sessionToken.expiresAt,
+      source: status.source,
+    });
+  });
+
+  app.get('/api/admin/verify', (req, res) => {
+    const token = extractBearerToken(req.headers.authorization);
+    const verified = verifyAdminSessionToken(token);
+    if (!verified) {
+      return res.status(401).json({ ok: false, error: 'Sesi admin tidak valid atau sudah berakhir.' });
+    }
+    return res.json({
+      ok: true,
+      role: verified.role,
+      subject: verified.sub,
+      expiresAt: new Date(verified.exp * 1000).toISOString(),
+    });
+  });
+
+  app.post('/api/admin/change-password', (req, res) => {
+    const token = extractBearerToken(req.headers.authorization);
+    if (!verifyAdminSessionToken(token)) {
+      return res.status(401).json({ ok: false, error: 'Otorisasi admin diperlukan untuk mengganti password.' });
+    }
+    const { currentPassword, newPassword } = req.body || {};
+    if (String(newPassword || '').length < 6) {
+      return res.status(400).json({ ok: false, error: 'Password baru minimal 6 karakter.' });
+    }
+    try {
+      const result = serverStore.changeAdminPassword(String(currentPassword || ''), String(newPassword || ''));
+      if (!result.ok) {
+        return res.status(result.status).json({ ok: false, error: result.error });
+      }
+      return res.json({ ok: true, updatedAt: result.updatedAt });
+    } catch (err) {
+      return res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Gagal memperbarui password admin.',
+      });
+    }
+  });
+
+  app.post('/api/admin/logout', (req, res) => {
+    const token = extractBearerToken(req.headers.authorization);
+    revokeAdminSessionToken(token);
+    return res.json({ ok: true });
   });
 
   // Public Session Link Validation & Sanitized Fetch (NEVER leaks answerKeys)
@@ -109,6 +230,19 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
     return res.json(result);
   });
 
+  // Safe Server-Side 50:50 Lifeline (NEVER leaks correctIndex to client)
+  app.post('/api/sessions/:code/lifeline-5050', (req, res) => {
+    const { questionId } = req.body || {};
+    if (!questionId) {
+      return res.status(400).json({ ok: false, error: 'questionId wajib diisi.' });
+    }
+    const result = serverStore.getFiftyFiftyDistractors(req.params.code, String(questionId));
+    if (!result.ok) {
+      return res.status(result.status).json({ ok: false, error: result.error });
+    }
+    return res.json(result);
+  });
+
   app.get('/api/sessions/:code/leaderboard', (req, res) => {
     const session = serverStore.getSessionByCode(req.params.code);
     if (!session) {
@@ -169,7 +303,19 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
 
   app.post('/api/teacher/banks', (req, res) => {
     try {
-      const { teacherId, title, subject, grade, topic, difficulty, items } = req.body || {};
+      const {
+        teacherId,
+        title,
+        subject,
+        grade,
+        topic,
+        difficulty,
+        driveFileId,
+        driveFileName,
+        driveModifiedTime,
+        lastSyncedAt,
+        items,
+      } = req.body || {};
       const cleanTitle = String(title ?? '').trim();
       const cleanSubject = String(subject ?? '').trim();
       const cleanTopic = String(topic ?? '').trim() || cleanTitle;
@@ -215,6 +361,10 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
         grade: grade || '11',
         topic: cleanTopic,
         difficulty: difficulty || 'Sedang',
+        driveFileId: driveFileId ? String(driveFileId) : undefined,
+        driveFileName: driveFileName ? String(driveFileName) : undefined,
+        driveModifiedTime: driveModifiedTime ? String(driveModifiedTime) : undefined,
+        lastSyncedAt: lastSyncedAt ? String(lastSyncedAt) : undefined,
         items,
       });
       return res.json({ ok: true, ...created });
@@ -227,6 +377,83 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
     }
   });
 
+  app.put('/api/teacher/banks/:id/sync', (req, res) => {
+    try {
+      const {
+        teacherId,
+        title,
+        subject,
+        grade,
+        topic,
+        difficulty,
+        driveFileId,
+        driveFileName,
+        driveModifiedTime,
+        bankSnapshot,
+        items,
+      } = req.body || {};
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Minimal 1 soal wajib disertakan saat menyinkronkan bank soal.',
+        });
+      }
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const promptText = String(item?.prompt ?? '').trim();
+        const rawOptions = Array.isArray(item?.options) ? item.options.slice(0, 5) : [];
+        const validOptions = rawOptions.map((o: unknown) => String(o ?? '').trim());
+        const correctIdx = Number(item?.correctIndex);
+
+        if (promptText.length < 2) {
+          return res.status(400).json({
+            ok: false,
+            error: `Teks pertanyaan pada Soal #${i + 1} wajib diisi minimal 2 karakter.`,
+          });
+        }
+        if (validOptions.length < 2 || validOptions.some((o: string) => o.length === 0)) {
+          return res.status(400).json({
+            ok: false,
+            error: `Semua pilihan jawaban pada Soal #${i + 1} wajib diisi (minimal 2 opsi).`,
+          });
+        }
+        if (!Number.isInteger(correctIdx) || correctIdx < 0 || correctIdx >= validOptions.length) {
+          return res.status(400).json({
+            ok: false,
+            error: `Kunci jawaban pada Soal #${i + 1} tidak valid.`,
+          });
+        }
+      }
+
+      const synced = serverStore.syncQuestionBankFromDrive(req.params.id, {
+        teacherId: teacherId ? String(teacherId) : undefined,
+        title: title ? String(title) : undefined,
+        subject: subject ? String(subject) : undefined,
+        grade,
+        topic: topic ? String(topic) : undefined,
+        difficulty,
+        driveFileId: driveFileId ? String(driveFileId) : undefined,
+        driveFileName: driveFileName ? String(driveFileName) : undefined,
+        driveModifiedTime: driveModifiedTime ? String(driveModifiedTime) : undefined,
+        bankSnapshot,
+        items,
+      });
+
+      if (!synced) {
+        return res.status(404).json({ ok: false, error: 'Bank soal target sinkronisasi tidak ditemukan.' });
+      }
+
+      return res.json({ ok: true, ...synced });
+    } catch (err) {
+      return res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Gagal menyinkronkan bank soal dari Google Drive.',
+      });
+    }
+  });
+
   app.post('/api/teacher/sessions', (req, res) => {
     try {
       const {
@@ -235,6 +462,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
         bankId,
         title,
         gameMode,
+        arenaId,
         difficulty,
         durationMinutes,
         maxAttempts,
@@ -255,6 +483,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
         bankId: String(bankId),
         title: String(title),
         gameMode: gameMode || 'Quiz Adventure',
+        arenaId,
         difficulty: difficulty || 'Sedang',
         durationMinutes: Number(durationMinutes || 30),
         maxAttempts: Number(maxAttempts || 3),

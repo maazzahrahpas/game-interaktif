@@ -17,7 +17,15 @@ import {
   Zap,
 } from 'lucide-react';
 import { EduverseWorldEngine } from '../game/EduverseWorldEngine.ts';
+import {
+  DEFAULT_ARENA_ID,
+  DEFAULT_SKIN_ID,
+  getArenaTheme,
+  getCharacterSkin,
+} from '../game/gameCatalog.ts';
+import type { ArenaThemeId, CharacterSkinId } from '../types/eduverse.ts';
 import { WORLD_ZONES } from '../utils/gameRules.ts';
+import { ArenaSkinSelector } from './ArenaSkinSelector.tsx';
 import { AudioSettingsPanel } from './AudioSettingsPanel.tsx';
 
 interface LandingPageProps {
@@ -27,6 +35,13 @@ interface LandingPageProps {
   onEnterDemoTeacher: () => void;
   onOpenJoinCode: (code: string) => void;
   onStartDemoWorld: () => void;
+  onStartQuizBlitz?: () => void;
+  selectedArenaId?: ArenaThemeId;
+  onChangeArenaId?: (arenaId: ArenaThemeId) => void;
+  selectedSkinId?: CharacterSkinId;
+  onChangeSkinId?: (skinId: CharacterSkinId) => void;
+  avatarColor?: string;
+  onChangeAvatarColor?: (hex: string) => void;
   authLoading: boolean;
   authError: string | null;
 }
@@ -57,20 +72,45 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onEnterDemoTeacher,
   onOpenJoinCode,
   onStartDemoWorld,
+  onStartQuizBlitz,
+  selectedArenaId = DEFAULT_ARENA_ID,
+  onChangeArenaId,
+  selectedSkinId = DEFAULT_SKIN_ID,
+  onChangeSkinId,
+  avatarColor = '#2563EB',
+  onChangeAvatarColor,
   authLoading,
   authError,
 }) => {
   const heroCanvasRef = useRef<HTMLDivElement | null>(null);
+  const tourEngineRef = useRef<EduverseWorldEngine | null>(null);
   const [joinCodeInput, setJoinCodeInput] = useState('EDU101');
   const [codeError, setCodeError] = useState('');
   const [showAudioSettings, setShowAudioSettings] = useState(false);
 
+  const activeArena = getArenaTheme(selectedArenaId);
+  const activeSkin = getCharacterSkin(selectedSkinId);
+
   useEffect(() => {
     const el = heroCanvasRef.current;
     if (!el) return;
-    const engine = new EduverseWorldEngine(el, { mode: 'tour' });
-    return () => engine.dispose();
+    const engine = new EduverseWorldEngine(el, {
+      mode: 'tour',
+      arenaId: selectedArenaId,
+      skinId: selectedSkinId,
+      avatarColor,
+    });
+    tourEngineRef.current = engine;
+    return () => {
+      tourEngineRef.current = null;
+      engine.dispose();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    tourEngineRef.current?.setArenaTheme(selectedArenaId);
+  }, [selectedArenaId]);
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,6 +219,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <Gamepad2 className="w-4 h-4" />
                 Jelajahi Dunia 3D
               </button>
+              {onStartQuizBlitz && (
+                <button
+                  type="button"
+                  onClick={onStartQuizBlitz}
+                  className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-md shadow-amber-500/20 transition-all hover:-translate-y-0.5 whitespace-nowrap shrink-0"
+                >
+                  <Zap className="w-4 h-4" />
+                  Kuis Arena Lengkap
+                </button>
+              )}
               <button
                 type="button"
                 disabled={authLoading}
@@ -249,17 +299,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="pointer-events-none absolute top-4 left-4 right-4 flex items-center justify-between gap-3">
                 <div className="rounded-xl bg-slate-950/85 px-3.5 py-2 text-white border border-slate-700/80">
                   <p className="text-[11px] font-bold text-amber-400 tracking-wide uppercase">
-                    Mode Tantangan Aktif
+                    Arena: {activeArena.name} · Skin: {activeSkin.name}
                   </p>
                   <p className="text-xs text-slate-200">
-                    Drone Patroli · Jump Pad · Musik Suspense
+                    Drone Patroli · Jump Pad · Kuis Power-Up · HP, Tablet & Desktop
                   </p>
                 </div>
               </div>
               <div className="pointer-events-none absolute bottom-4 left-4 right-4 flex items-center justify-between gap-4 rounded-xl bg-slate-950/90 px-4 py-3 text-white border border-slate-700/80">
                 <div>
                   <p className="text-xs text-sky-300 font-semibold">Pratinjau Live 3D Eduverse</p>
-                  <p className="text-sm font-medium">6 Zona Eksplorasi · 6 NPC Misi · Boss Arena</p>
+                  <p className="text-sm font-medium">4 Arena 3D · 6 Skin Avatar · Kuis & Power-Up</p>
                 </div>
                 <button
                   type="button"
@@ -273,6 +323,51 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </div>
       </section>
+
+      {/* Interactive Arena & Skin Customization Section */}
+      {onChangeArenaId && onChangeSkinId && onChangeAvatarColor && (
+        <section
+          id="kustomisasi-arena"
+          className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
+        >
+          <div className="mx-auto max-w-7xl px-6 py-12">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-sky-400">
+                  Personalisasi Arena & Karakter 3D
+                </p>
+                <h2 className="mt-1 text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white text-balance">
+                  Pilih Arena Pertempuran Ilmu & Skin Avatar Pilihanmu
+                </h2>
+                <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300 max-w-2xl">
+                  Klik arena untuk melihat langsung perubahan dunia 3D di atas, pilih 1 dari 6 karakter unik, lalu langsung bermain di HP, Tablet, maupun Desktop.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={onStartDemoWorld}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold whitespace-nowrap"
+                >
+                  <Gamepad2 className="w-4 h-4" />
+                  Main dengan Setelan Ini
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-sm">
+              <ArenaSkinSelector
+                selectedArenaId={selectedArenaId}
+                onSelectArena={onChangeArenaId}
+                selectedSkinId={selectedSkinId}
+                onSelectSkin={onChangeSkinId}
+                avatarColor={avatarColor}
+                onSelectColor={onChangeAvatarColor}
+              />
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* New Thrilling Challenge Highlights Strip */}
       <section id="tantangan-game" className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">

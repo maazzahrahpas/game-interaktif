@@ -29,11 +29,26 @@ import type {
   StudentQuestion,
   UserRole,
 } from '../types/eduverse.ts';
+import { arenaIdToWorldId, resolveArenaIdFromSession } from '../game/gameCatalog.ts';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const firestoreDatabaseId =
+  (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId ||
+  'ai-studio-c0597574-e066-451c-b24c-36af24f4c03a';
+export const db = getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+export const GOOGLE_DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.readonly'] as const;
+
+const googleDriveProvider = new GoogleAuthProvider();
+for (const scope of GOOGLE_DRIVE_SCOPES) {
+  googleDriveProvider.addScope(scope);
+}
+
+// Keep Workspace OAuth access tokens strictly in memory (never localStorage/sessionStorage)
+let cachedDriveAccessToken: string | null = null;
+let isConnectingDrive = false;
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'ma.azzahrahpas@gmail.com';
 
@@ -105,17 +120,56 @@ export async function testConnection(): Promise<{ online: boolean; message?: str
 // Run startup connectivity check
 void testConnection();
 
+export function getDriveAccessToken(): string | null {
+  return cachedDriveAccessToken;
+}
+
+export function clearDriveAccessToken(): void {
+  cachedDriveAccessToken = null;
+}
+
+export async function connectGoogleDrive(): Promise<{
+  user: EduverseUser;
+  accessToken: string;
+  email?: string;
+}> {
+  isConnectingDrive = true;
+  try {
+    googleDriveProvider.setCustomParameters({ prompt: 'consent select_account' });
+    const result = await signInWithPopup(auth, googleDriveProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error('Token akses Google Drive tidak tersedia. Pastikan izin Google Drive disetujui.');
+    }
+    cachedDriveAccessToken = credential.accessToken;
+    const profile = await ensureUserProfile(result.user, 'guru');
+    return {
+      user: profile,
+      accessToken: credential.accessToken,
+      email: result.user.email || undefined,
+    };
+  } finally {
+    isConnectingDrive = false;
+  }
+}
+
 export async function signInWithGoogleRole(preferredRole: 'guru' | 'siswa'): Promise<EduverseUser> {
   const cred = await signInWithPopup(auth, googleProvider);
   return ensureUserProfile(cred.user, preferredRole);
 }
 
 export async function signOutFirebase(): Promise<void> {
+  cachedDriveAccessToken = null;
   await signOut(auth);
 }
 
 export function subscribeAuthState(cb: (user: FirebaseUser | null) => void) {
-  return onAuthStateChanged(auth, cb);
+  return onAuthStateChanged(auth, (fbUser) => {
+    if (!fbUser && !isConnectingDrive) {
+      cachedDriveAccessToken = null;
+    }
+    cb(fbUser);
+  });
 }
 
 export async function fetchExistingUserProfile(fbUser: FirebaseUser): Promise<EduverseUser | null> {
@@ -309,7 +363,7 @@ export async function syncSessionToFirestore(session: GameSession): Promise<void
       topic: session.topic.slice(0, 100),
       difficulty: session.difficulty,
       gameMode: session.gameMode,
-      worldId: session.worldId,
+      worldId: session.arenaId ? arenaIdToWorldId(session.arenaId) : session.worldId,
       durationMinutes: session.durationMinutes,
       maxAttempts: session.maxAttempts,
       questionCount: session.questionCount,
@@ -460,6 +514,7 @@ export async function fetchTeacherWorkspaceFromFirestore(uid: string): Promise<{
         difficulty: v.difficulty || 'Sedang',
         gameMode: v.gameMode || 'Quiz Adventure',
         worldId: String(v.worldId || 'world_eduverse_utama'),
+        arenaId: resolveArenaIdFromSession({ worldId: String(v.worldId || 'world_eduverse_utama') }),
         durationMinutes: Number(v.durationMinutes || 30),
         maxAttempts: Number(v.maxAttempts || 3),
         questionCount: Number(v.questionCount || 0),

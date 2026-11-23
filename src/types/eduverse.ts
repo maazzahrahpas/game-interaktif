@@ -13,6 +13,24 @@ export type GameMode =
 export type SessionStatus = 'draft' | 'active' | 'ended';
 export type AnimState = 'idle' | 'walk' | 'run' | 'jump' | 'interact';
 
+export type ArenaThemeId =
+  | 'akademi_langit'
+  | 'cyber_lab'
+  | 'lembah_vulcano'
+  | 'stasiun_kosmik';
+
+export type CharacterSkinId =
+  | 'explorer'
+  | 'cyber_knight'
+  | 'bio_scientist'
+  | 'arcane_scholar'
+  | 'astro_pilot'
+  | 'ninja_logic';
+
+export type DeviceProfile = 'phone' | 'tablet' | 'desktop';
+export type TouchControlSize = 'compact' | 'normal' | 'large';
+export type QuizLifelineType = 'fifty_fifty' | 'freeze_time' | 'shield_boost';
+
 export type WorldZoneId =
   | 'sekolah'
   | 'taman'
@@ -29,6 +47,7 @@ export interface EduverseUser {
   schoolName?: string;
   role: UserRole;
   avatarColor: string;
+  skinId?: CharacterSkinId;
   xp: number;
   level: number;
   createdAt: string;
@@ -57,8 +76,21 @@ export interface QuestionBank {
   topic: string;
   difficulty: DifficultyLevel;
   questionCount: number;
+  driveFileId?: string;
+  driveFileName?: string;
+  driveModifiedTime?: string;
+  lastSyncedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DriveDocxFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+  size?: string;
+  webViewLink?: string;
 }
 
 export interface StudentQuestion {
@@ -115,6 +147,7 @@ export interface GameSession {
   difficulty: DifficultyLevel;
   gameMode: GameMode;
   worldId: string;
+  arenaId?: ArenaThemeId;
   durationMinutes: number;
   maxAttempts: number;
   questionCount: number;
@@ -193,6 +226,7 @@ export interface PlayerAvatarState {
   studentId: string;
   displayName: string;
   avatarColor: string;
+  skinId?: CharacterSkinId;
   x: number;
   y: number;
   z: number;
