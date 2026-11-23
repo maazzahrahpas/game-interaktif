@@ -1153,6 +1153,50 @@
       "status": "active",
       "createdAt": "2026-11-17T02:37:20.438Z",
       "updatedAt": "2026-11-23T01:04:33.604Z"
+    },
+    "prog_sess_edu101_stu_budisantoso_p0qv": {
+      "id": "prog_sess_edu101_stu_budisantoso_p0qv",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_budisantoso_p0qv",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Budi Santoso",
+      "studentIdentity": "XI IPA 1",
+      "score": 0,
+      "xpEarned": 0,
+      "correctCount": 0,
+      "totalAnswered": 0,
+      "attemptsUsed": 1,
+      "completedQuests": [],
+      "unlockedZones": [
+        "sekolah",
+        "taman"
+      ],
+      "currentZone": "sekolah",
+      "status": "active",
+      "createdAt": "2026-11-23T01:35:56.145Z",
+      "updatedAt": "2026-11-23T01:35:56.145Z"
+    },
+    "prog_sess_edu101_stu_sitiaminah_3sqd": {
+      "id": "prog_sess_edu101_stu_sitiaminah_3sqd",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_sitiaminah_3sqd",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Siti Aminah",
+      "studentIdentity": "XI IPA 2",
+      "score": 0,
+      "xpEarned": 0,
+      "correctCount": 0,
+      "totalAnswered": 0,
+      "attemptsUsed": 1,
+      "completedQuests": [],
+      "unlockedZones": [
+        "sekolah",
+        "taman"
+      ],
+      "currentZone": "sekolah",
+      "status": "active",
+      "createdAt": "2026-11-23T01:36:30.308Z",
+      "updatedAt": "2026-11-23T01:36:30.308Z"
     }
   },
   "submissions": {
@@ -1184,6 +1228,32 @@
       "accuracy": 100,
       "isPublicInSession": true,
       "updatedAt": "2026-11-23T00:54:26.623Z"
+    },
+    "lb_sess_edu101_stu_budisantoso_p0qv": {
+      "id": "lb_sess_edu101_stu_budisantoso_p0qv",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_budisantoso_p0qv",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Budi Santoso",
+      "score": 0,
+      "xp": 0,
+      "level": 1,
+      "accuracy": 0,
+      "isPublicInSession": true,
+      "updatedAt": "2026-11-23T01:35:56.145Z"
+    },
+    "lb_sess_edu101_stu_sitiaminah_3sqd": {
+      "id": "lb_sess_edu101_stu_sitiaminah_3sqd",
+      "sessionId": "sess_edu101",
+      "studentId": "stu_sitiaminah_3sqd",
+      "teacherId": "teacher_demo_1",
+      "studentName": "Siti Aminah",
+      "score": 0,
+      "xp": 0,
+      "level": 1,
+      "accuracy": 0,
+      "isPublicInSession": true,
+      "updatedAt": "2026-11-23T01:36:30.308Z"
     }
   },
   "achievements": {
@@ -1198,6 +1268,26 @@
     }
   },
   "auditLogs": [
+    {
+      "id": "log_1795397790308_wk7yi",
+      "actorId": "stu_sitiaminah_3sqd",
+      "actorRole": "siswa",
+      "action": "JOIN_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_edu101",
+      "summary": "Siti Aminah bergabung ke sesi EDU101",
+      "createdAt": "2026-11-23T01:36:30.308Z"
+    },
+    {
+      "id": "log_1795397756145_m9tzp",
+      "actorId": "stu_budisantoso_p0qv",
+      "actorRole": "siswa",
+      "action": "JOIN_SESSION",
+      "targetType": "gameSession",
+      "targetId": "sess_edu101",
+      "summary": "Budi Santoso bergabung ke sesi EDU101",
+      "createdAt": "2026-11-23T01:35:56.145Z"
+    },
     {
       "id": "log_1795395937867_9hrnu",
       "actorId": "admin_website",

@@ -14,9 +14,12 @@ import {
   summarizeLearningResults,
 } from './geminiService.ts';
 
+import type { PlayerAvatarState } from '../types/eduverse.ts';
+
 export interface CreateApiAppOptions {
   onBroadcastRoom?: (sessionId: string, payload: unknown) => void;
   getOnlineCount?: (sessionId: string) => number;
+  getRoomPlayers?: (sessionId: string) => PlayerAvatarState[];
 }
 
 export function createApiApp(options: CreateApiAppOptions = {}): express.Express {
@@ -24,6 +27,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
   const jsonParser = express.json({ limit: '16mb' });
   const broadcastToRoom = options.onBroadcastRoom ?? (() => undefined);
   const getOnlineCount = options.getOnlineCount ?? (() => 0);
+  const getWsRoomPlayers = options.getRoomPlayers ?? (() => []);
 
   // Support both raw Node/Express streams and runtimes that pre-populate req.body cleanly
   app.use((req, res, next) => {
@@ -251,8 +255,99 @@ export function createApiApp(options: CreateApiAppOptions = {}): express.Express
     return res.json({
       ok: true,
       leaderboard: serverStore.getSessionLeaderboard(session.id),
-      onlineCount: getOnlineCount(session.id),
+      onlineCount: Math.max(getOnlineCount(session.id), serverStore.getRoomPlayers(session.id).length),
     });
+  });
+
+  // Live Multiplayer Room Presence & Position Sync (works over HTTP/serverless and bridges WebSockets)
+  const mergeRoomPlayers = (sessionId: string): PlayerAvatarState[] => {
+    const merged = new Map<string, PlayerAvatarState>();
+    for (const p of serverStore.getRoomPlayers(sessionId)) {
+      merged.set(p.studentId, p);
+    }
+    for (const p of getWsRoomPlayers(sessionId)) {
+      merged.set(p.studentId, p);
+    }
+    return Array.from(merged.values());
+  };
+
+  app.get('/api/sessions/:code/players', (req, res) => {
+    const session = serverStore.getSessionByCode(req.params.code);
+    if (!session) {
+      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
+    }
+    return res.json({
+      ok: true,
+      sessionId: session.id,
+      players: mergeRoomPlayers(session.id),
+    });
+  });
+
+  app.post('/api/sessions/:code/players', (req, res) => {
+    const session = serverStore.getSessionByCode(req.params.code);
+    if (!session) {
+      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
+    }
+    const { studentId, displayName, avatarColor, skinId, x, y, z, rotY, animState, currentZone } = req.body || {};
+    if (!studentId || !String(studentId).trim()) {
+      return res.status(400).json({ ok: false, error: 'studentId wajib diisi.' });
+    }
+    const result = serverStore.upsertRoomPlayer(session.id, {
+      studentId: String(studentId),
+      displayName: String(displayName || 'Penjelajah'),
+      avatarColor: avatarColor ? String(avatarColor) : undefined,
+      skinId,
+      x,
+      y,
+      z,
+      rotY,
+      animState,
+      currentZone,
+    });
+    broadcastToRoom(session.id, {
+      type: 'player_moved',
+      player: result.player,
+    });
+    return res.json({
+      ok: true,
+      sessionId: session.id,
+      player: result.player,
+      players: mergeRoomPlayers(session.id),
+    });
+  });
+
+  app.delete('/api/sessions/:code/players/:studentId', (req, res) => {
+    const session = serverStore.getSessionByCode(req.params.code);
+    if (!session) {
+      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
+    }
+    const studentId = String(req.params.studentId || '').trim();
+    serverStore.removeRoomPlayer(session.id, studentId);
+    broadcastToRoom(session.id, {
+      type: 'player_left',
+      studentId,
+    });
+    return res.json({
+      ok: true,
+      sessionId: session.id,
+      players: mergeRoomPlayers(session.id),
+    });
+  });
+
+  app.post('/api/sessions/:code/players/leave', (req, res) => {
+    const session = serverStore.getSessionByCode(req.params.code);
+    if (!session) {
+      return res.status(404).json({ ok: false, error: 'Sesi tidak ditemukan.' });
+    }
+    const studentId = String(req.body?.studentId || '').trim();
+    if (studentId) {
+      serverStore.removeRoomPlayer(session.id, studentId);
+      broadcastToRoom(session.id, {
+        type: 'player_left',
+        studentId,
+      });
+    }
+    return res.json({ ok: true });
   });
 
   app.get('/api/student/:studentId/summary', (req, res) => {

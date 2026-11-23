@@ -18,16 +18,21 @@ import {
   query,
   where,
   getDocs,
+  onSnapshot,
+  deleteDoc,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
+  AnimState,
   AnswerKey,
   Classroom,
   EduverseUser,
   GameSession,
+  PlayerAvatarState,
   QuestionBank,
   StudentQuestion,
   UserRole,
+  WorldZoneId,
 } from '../types/eduverse.ts';
 import { arenaIdToWorldId, resolveArenaIdFromSession } from '../game/gameCatalog.ts';
 
@@ -534,3 +539,107 @@ export async function fetchTeacherWorkspaceFromFirestore(uid: string): Promise<{
 
   return { classes, questionBanks, questions, answerKeys, gameSessions };
 }
+
+export async function syncPlayerStateToFirestore(state: {
+  sessionId: string;
+  studentId: string;
+  displayName: string;
+  avatarColor: string;
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  animState: AnimState;
+  currentZone: WorldZoneId;
+  isOnline: boolean;
+}): Promise<void> {
+  const user = auth.currentUser;
+  if (!user || !user.emailVerified || user.uid !== state.studentId) {
+    return;
+  }
+  const safeId = `ps_${state.sessionId}_${state.studentId}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 128);
+  const docRef = doc(db, 'playerStates', safeId);
+
+  if (!state.isOnline) {
+    try {
+      await deleteDoc(docRef);
+    } catch {
+      // Ignore if document doesn't exist or session is local-only
+    }
+    return;
+  }
+
+  const wrappedRot =
+    ((((Number(state.rotY) || 0) + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  const clamp = (val: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, Number.isFinite(val) ? Number(val.toFixed(2)) : 0));
+
+  try {
+    await setDoc(docRef, {
+      id: safeId,
+      sessionId: state.sessionId,
+      studentId: state.studentId,
+      displayName: (state.displayName.trim() || 'Penjelajah').slice(0, 80),
+      avatarColor: (state.avatarColor || '#2563EB').slice(0, 20),
+      x: clamp(state.x, -500, 500),
+      y: clamp(state.y, -50, 200),
+      z: clamp(state.z, -500, 500),
+      rotY: Number(wrappedRot.toFixed(3)),
+      animState: state.animState,
+      currentZone: state.currentZone || 'sekolah',
+      isOnline: true,
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Ignore silently if Firestore gameSessions doc does not exist (e.g. demo EDU101 session)
+  }
+}
+
+export function subscribeSessionPlayerStates(
+  sessionId: string,
+  onUpdate: (players: PlayerAvatarState[]) => void
+): () => void {
+  if (!auth.currentUser) {
+    return () => undefined;
+  }
+  const q = query(
+    collection(db, 'playerStates'),
+    where('sessionId', '==', sessionId),
+    where('isOnline', '==', true)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const nowMs = Date.now();
+      const players: PlayerAvatarState[] = [];
+      snap.docs.forEach((d) => {
+        const v = d.data();
+        const updatedIso = toIsoString(v.updatedAt);
+        const updatedMs = Date.parse(updatedIso);
+        if (Number.isFinite(updatedMs) && nowMs - updatedMs > 60000) {
+          return;
+        }
+        players.push({
+          id: String(v.id || d.id),
+          sessionId: String(v.sessionId || sessionId),
+          studentId: String(v.studentId || ''),
+          displayName: String(v.displayName || 'Penjelajah'),
+          avatarColor: String(v.avatarColor || '#3B82F6'),
+          x: Number(v.x || 0),
+          y: Number(v.y || 0),
+          z: Number(v.z || 14),
+          rotY: Number(v.rotY || Math.PI),
+          animState: (v.animState as AnimState) || 'idle',
+          currentZone: (v.currentZone as WorldZoneId) || 'sekolah',
+          isOnline: Boolean(v.isOnline),
+          updatedAt: updatedIso,
+        });
+      });
+      onUpdate(players);
+    },
+    () => {
+      // Ignore silent listener errors when offline or unauthenticated
+    }
+  );
+}
+

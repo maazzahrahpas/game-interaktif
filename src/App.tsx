@@ -35,6 +35,35 @@ const DEMO_TEACHER_USER: EduverseUser = {
   updatedAt: new Date().toISOString(),
 };
 
+function getOrCreateGuestExplorerIdentity(): { studentId: string; studentName: string } {
+  const storageKey = 'eduverse-guest-explorer-v1';
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = window.sessionStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as { studentId?: string; studentName?: string };
+        if (parsed.studentId && parsed.studentName) {
+          return { studentId: parsed.studentId, studentName: parsed.studentName };
+        }
+      }
+      const tag = Math.random().toString(36).slice(2, 6).toUpperCase();
+      const created = {
+        studentId: `stu_exp_${tag.toLowerCase()}_${Date.now().toString(36).slice(-3)}`,
+        studentName: `Penjelajah ${tag.slice(0, 3)}`,
+      };
+      window.sessionStorage.setItem(storageKey, JSON.stringify(created));
+      return created;
+    } catch {
+      // Ignore storage errors
+    }
+  }
+  const fallbackTag = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return {
+    studentId: `stu_exp_${fallbackTag.toLowerCase()}`,
+    studentName: `Penjelajah ${fallbackTag.slice(0, 3)}`,
+  };
+}
+
 function parseInitialRoute(): { view: AppView; joinCode: string; autostart: boolean } {
   if (typeof window === 'undefined') {
     return { view: 'landing', joinCode: 'EDU101', autostart: false };
@@ -116,13 +145,14 @@ export default function App() {
     async (
       targetCode: string,
       identity?: {
-        studentId: string;
-        studentName: string;
+        studentId?: string;
+        studentName?: string;
         studentIdentity?: string;
         avatarColor?: string;
         skinId?: CharacterSkinId;
         arenaIdOverride?: ArenaThemeId;
         openQuizOnStart?: boolean;
+        initialSoloMode?: boolean;
       }
     ) => {
       setBootingWorld(true);
@@ -136,11 +166,13 @@ export default function App() {
           return;
         }
 
-        const studentId = identity?.studentId || 'stu_demo_explorer';
-        const studentName = identity?.studentName || 'Penjelajah Eduverse';
-        const studentIdentity = identity?.studentIdentity || 'XI IPA 1';
-        const avatarColor = identity?.avatarColor || selectedAvatarColor || '#2563EB';
-        const skinId = identity?.skinId || selectedSkinId;
+        const guestIdentity = getOrCreateGuestExplorerIdentity();
+        const activeSiswa = currentUser?.role === 'siswa' ? currentUser : null;
+        const studentId = identity?.studentId || activeSiswa?.uid || guestIdentity.studentId;
+        const studentName = identity?.studentName || activeSiswa?.displayName || guestIdentity.studentName;
+        const studentIdentity = identity?.studentIdentity || activeSiswa?.identityNumber || 'XI IPA 1';
+        const avatarColor = identity?.avatarColor || activeSiswa?.avatarColor || selectedAvatarColor || '#2563EB';
+        const skinId = identity?.skinId || activeSiswa?.skinId || selectedSkinId;
 
         const joinRes = await fetch(`/api/sessions/${encodeURIComponent(cleanCode)}/join`, {
           method: 'POST',
@@ -169,6 +201,7 @@ export default function App() {
           skinId,
           arenaIdOverride: identity?.arenaIdOverride,
           openQuizOnStart: identity?.openQuizOnStart,
+          initialSoloMode: identity?.initialSoloMode ?? false,
         });
         setView('world');
       } catch {
@@ -177,7 +210,7 @@ export default function App() {
         setBootingWorld(false);
       }
     },
-    [selectedAvatarColor, selectedSkinId]
+    [currentUser, selectedAvatarColor, selectedSkinId]
   );
 
   // Support ?autostart=1 to jump directly into playable 3D world
@@ -322,6 +355,7 @@ export default function App() {
         skinId={activeWorldPayload.skinId ?? selectedSkinId}
         arenaId={activeWorldPayload.arenaIdOverride}
         openQuizOnStart={activeWorldPayload.openQuizOnStart}
+        initialSoloMode={activeWorldPayload.initialSoloMode}
         onExitWorld={handleExitWorld}
       />
     );
@@ -393,8 +427,6 @@ export default function App() {
         onOpenJoinCode={navigateToJoinCode}
         onStartDemoWorld={() =>
           void launchDirectSessionWorld('EDU101', {
-            studentId: 'stu_demo_explorer',
-            studentName: 'Penjelajah Eduverse',
             avatarColor: selectedAvatarColor,
             skinId: selectedSkinId,
             arenaIdOverride: selectedArenaId,
@@ -402,8 +434,6 @@ export default function App() {
         }
         onStartQuizBlitz={() =>
           void launchDirectSessionWorld('EDU101', {
-            studentId: 'stu_demo_explorer',
-            studentName: 'Penjelajah Eduverse',
             avatarColor: selectedAvatarColor,
             skinId: selectedSkinId,
             arenaIdOverride: selectedArenaId,

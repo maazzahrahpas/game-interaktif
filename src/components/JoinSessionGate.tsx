@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, AlertTriangle, CheckCircle2, Clock, Gamepad2, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, CheckCircle2, Clock, Gamepad2, Loader2, ShieldCheck, User, Users } from 'lucide-react';
 import type {
   ArenaThemeId,
   CharacterSkinId,
@@ -30,6 +30,7 @@ export interface JoinedSessionPayload {
   skinId?: CharacterSkinId;
   arenaIdOverride?: ArenaThemeId;
   openQuizOnStart?: boolean;
+  initialSoloMode?: boolean;
 }
 
 interface JoinSessionGateProps {
@@ -68,6 +69,7 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
   const [avatarColor, setAvatarColor] = useState(defaultAvatarColor);
   const [skinId, setSkinId] = useState<CharacterSkinId>(defaultSkinId);
   const [arenaId, setArenaId] = useState<ArenaThemeId>(defaultArenaId);
+  const [soloMode, setSoloMode] = useState(false);
   const [formError, setFormError] = useState('');
 
   useEffect(() => {
@@ -117,13 +119,24 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
 
     setFormError('');
     setSubmitting(true);
+    let tabTag = Math.random().toString(36).slice(2, 6);
+    try {
+      const existingTag = window.sessionStorage.getItem('eduverse-tab-guest-tag');
+      if (existingTag) {
+        tabTag = existingTag;
+      } else {
+        window.sessionStorage.setItem('eduverse-tab-guest-tag', tabTag);
+      }
+    } catch {
+      // Ignore storage errors
+    }
     const sid =
       defaultStudentId ||
       `stu_${studentName
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '')
-        .slice(0, 12)}_${Math.random().toString(36).slice(2, 6)}`;
+        .slice(0, 12) || 'siswa'}_${tabTag}`;
 
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionData.session.joinCode)}/join`, {
@@ -151,6 +164,7 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
         avatarColor,
         skinId,
         arenaIdOverride: arenaId,
+        initialSoloMode: soloMode,
       });
     } catch {
       setFormError('Kesalahan jaringan saat mendaftar sesi.');
@@ -274,6 +288,50 @@ export const JoinSessionGate: React.FC<JoinSessionGateProps> = ({
                     placeholder="Contoh: 20261104 / XI IPA 1"
                     className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">
+                  Mode Permainan di Arena
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    data-testid="join-mode-multiplayer"
+                    onClick={() => setSoloMode(false)}
+                    className={`text-left rounded-xl border p-3.5 transition-all flex items-start gap-3 ${
+                      !soloMode
+                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-100 ring-2 ring-emerald-500/30'
+                        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Users className={`w-5 h-5 shrink-0 mt-0.5 ${!soloMode ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
+                    <div>
+                      <p className="text-sm font-bold">Multiplayer (Bareng Teman)</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Siswa lain terlihat & bergerak bersama di arena 3D.
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="join-mode-individual"
+                    onClick={() => setSoloMode(true)}
+                    className={`text-left rounded-xl border p-3.5 transition-all flex items-start gap-3 ${
+                      soloMode
+                        ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/50 text-amber-950 dark:text-amber-100 ring-2 ring-amber-500/30'
+                        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <User className={`w-5 h-5 shrink-0 mt-0.5 ${soloMode ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`} />
+                    <div>
+                      <p className="text-sm font-bold">Individual (Solo)</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Bermain sendiri tanpa menampilkan pemain lain.
+                      </p>
+                    </div>
+                  </button>
                 </div>
               </div>
 

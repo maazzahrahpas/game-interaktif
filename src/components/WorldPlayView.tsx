@@ -22,15 +22,19 @@ import {
   Tablet,
   Timer,
   Trophy,
+  User,
   Users,
   Volume2,
   VolumeX,
-  Wifi,
-  WifiOff,
   X,
   XCircle,
   Zap,
 } from 'lucide-react';
+import {
+  auth,
+  subscribeSessionPlayerStates,
+  syncPlayerStateToFirestore,
+} from '../lib/firebase.ts';
 import { EduverseWorldEngine } from '../game/EduverseWorldEngine.ts';
 import {
   DEFAULT_SKIN_ID,
@@ -84,6 +88,7 @@ interface WorldPlayViewProps {
   skinId?: CharacterSkinId;
   arenaId?: ArenaThemeId;
   openQuizOnStart?: boolean;
+  initialSoloMode?: boolean;
   onExitWorld: (latestProgress: StudentProgress) => void;
 }
 
@@ -125,6 +130,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   skinId,
   arenaId,
   openQuizOnStart = false,
+  initialSoloMode = false,
   onExitWorld,
 }) => {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -165,8 +171,36 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
   } = useAudio();
 
   const [wsConnected, setWsConnected] = useState(false);
-  const [soloMode, setSoloMode] = useState(false);
+  const [httpSyncReady, setHttpSyncReady] = useState(false);
+  const [soloMode, setSoloMode] = useState(initialSoloMode);
   const [onlinePlayers, setOnlinePlayers] = useState<PlayerAvatarState[]>([]);
+
+  // Cross-transport player state caches (WebSocket + HTTP Room Sync + optional Firestore)
+  const latestLocalStateRef = useRef<{
+    x: number;
+    y: number;
+    z: number;
+    rotY: number;
+    animState: PlayerAvatarState['animState'];
+    currentZone: WorldZoneId;
+  }>({
+    x: 0,
+    y: 0,
+    z: 14,
+    rotY: Math.PI,
+    animState: 'idle',
+    currentZone: initialProgress.currentZone || 'sekolah',
+  });
+  const wsPlayersRef = useRef<Map<string, PlayerAvatarState>>(new Map());
+  const httpPlayersRef = useRef<Map<string, PlayerAvatarState>>(new Map());
+  const fsPlayersRef = useRef<Map<string, PlayerAvatarState>>(new Map());
+  const lastHttpPostMsRef = useRef(0);
+  const lastFsPostMsRef = useRef(0);
+  const dirtyMoveRef = useRef(false);
+  const currentSkinIdRef = useRef(currentSkinId);
+  currentSkinIdRef.current = currentSkinId;
+  const currentAvatarColorRef = useRef(currentAvatarColor);
+  currentAvatarColorRef.current = currentAvatarColor;
 
   // Cross-Device Ergonomics (Phone / Tablet / Desktop)
   const touchOverriddenRef = useRef(false);
@@ -288,6 +322,73 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
 
   const audioActionsRef = useRef({ startMusic, stopMusic, playSfx });
   audioActionsRef.current = { startMusic, stopMusic, playSfx };
+
+  const rebuildAndSyncPlayers = useCallback(() => {
+    if (soloModeRef.current) {
+      setOnlinePlayers([]);
+      engineRef.current?.syncRemotePlayers([], studentId);
+      return;
+    }
+    const merged = new Map<string, PlayerAvatarState>();
+    for (const p of fsPlayersRef.current.values()) {
+      merged.set(p.studentId, p);
+    }
+    for (const p of httpPlayersRef.current.values()) {
+      const prev = merged.get(p.studentId);
+      merged.set(p.studentId, { ...prev, ...p, skinId: p.skinId || prev?.skinId });
+    }
+    for (const p of wsPlayersRef.current.values()) {
+      const prev = merged.get(p.studentId);
+      merged.set(p.studentId, { ...prev, ...p, skinId: p.skinId || prev?.skinId });
+    }
+    const list = Array.from(merged.values());
+    setOnlinePlayers(list);
+    engineRef.current?.syncRemotePlayers(list, studentId);
+  }, [studentId]);
+
+  const pushHttpPresence = useCallback(async () => {
+    if (soloModeRef.current) return;
+    lastHttpPostMsRef.current = Date.now();
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.joinCode)}/players`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId,
+          displayName: studentName,
+          avatarColor: currentAvatarColorRef.current,
+          skinId: currentSkinIdRef.current,
+          ...latestLocalStateRef.current,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.players)) {
+        setHttpSyncReady(true);
+        const nextMap = new Map<string, PlayerAvatarState>();
+        for (const p of data.players as PlayerAvatarState[]) {
+          nextMap.set(p.studentId, p);
+        }
+        httpPlayersRef.current = nextMap;
+        rebuildAndSyncPlayers();
+      }
+    } catch {
+      // Ignore transient network errors during polling
+    }
+  }, [session.joinCode, studentId, studentName, rebuildAndSyncPlayers]);
+
+  const handleSetSoloMode = useCallback(
+    (nextSolo: boolean) => {
+      playSfx('uiClick');
+      setSoloMode(nextSolo);
+      setToastMsg(
+        nextSolo
+          ? 'Mode Individual (Solo) aktif. Anda bermain sendiri tanpa avatar pemain lain.'
+          : 'Mode Multiplayer aktif! Menyinkronkan siswa lain di arena yang sama...'
+      );
+    },
+    [playSfx]
+  );
 
   const loadQuestionIntoQuizModal = useCallback((q: StudentQuestion) => {
     setActiveQuestion(q);
@@ -411,10 +512,32 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
           }
         },
         onLocalMoveBroadcast: (state) => {
+          latestLocalStateRef.current = {
+            x: state.x,
+            y: state.y,
+            z: state.z,
+            rotY: state.rotY,
+            animState: state.animState,
+            currentZone: state.currentZone,
+          };
+          dirtyMoveRef.current = true;
           if (soloModeRef.current) return;
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'player_move', ...state }));
+          } else if (Date.now() - lastHttpPostMsRef.current >= 450) {
+            void pushHttpPresence();
+          }
+          if (auth.currentUser?.uid === studentId && Date.now() - lastFsPostMsRef.current >= 1500) {
+            lastFsPostMsRef.current = Date.now();
+            void syncPlayerStateToFirestore({
+              sessionId: session.id,
+              studentId,
+              displayName: studentName,
+              avatarColor: currentAvatarColorRef.current,
+              ...state,
+              isOnline: true,
+            });
           }
         },
       },
@@ -439,10 +562,26 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentName]);
 
-  // Live sync skin, color, arena, and camera preferences into Three.js engine
+  // Live sync skin, color, arena, and camera preferences into Three.js engine + multiplayer room
   useEffect(() => {
     engineRef.current?.setPlayerAppearance(currentSkinId, currentAvatarColor, studentName);
-  }, [currentSkinId, currentAvatarColor, studentName]);
+    if (!soloModeRef.current) {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'player_update',
+            displayName: studentName,
+            avatarColor: currentAvatarColor,
+            skinId: currentSkinId,
+            ...latestLocalStateRef.current,
+          })
+        );
+      } else {
+        void pushHttpPresence();
+      }
+    }
+  }, [currentSkinId, currentAvatarColor, studentName, pushHttpPresence]);
 
   useEffect(() => {
     engineRef.current?.setArenaTheme(currentArenaId);
@@ -564,82 +703,166 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleMute]);
 
-  // Real-time WebSocket Multiplayer Connection
+  // Real-time Dual-Transport Multiplayer Connection (WebSocket + HTTP Room Sync + Firestore mirror)
   useEffect(() => {
-    if (soloMode) {
-      wsRef.current?.close();
-      wsRef.current = null;
-      setWsConnected(false);
-      setOnlinePlayers([]);
-      engineRef.current?.syncRemotePlayers([], studentId);
-      return;
-    }
-
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setWsConnected(true);
-      ws.send(
-        JSON.stringify({
-          type: 'join_room',
+    const leaveRoomEverywhere = () => {
+      fetch(
+        `/api/sessions/${encodeURIComponent(session.joinCode)}/players/${encodeURIComponent(studentId)}`,
+        { method: 'DELETE', keepalive: true }
+      ).catch(() => undefined);
+      if (auth.currentUser?.uid === studentId) {
+        void syncPlayerStateToFirestore({
           sessionId: session.id,
           studentId,
           displayName: studentName,
-          role: 'siswa',
-          avatarColor: currentAvatarColor,
-          skinId: currentSkinId,
-          x: 0,
-          y: 0,
-          z: 14,
-          rotY: Math.PI,
-        })
-      );
-    };
-
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(String(evt.data));
-        if (msg.type === 'room_init') {
-          const list = (msg.players || []) as PlayerAvatarState[];
-          setOnlinePlayers(list);
-          engineRef.current?.syncRemotePlayers(list, studentId);
-        } else if (msg.type === 'player_joined' || msg.type === 'player_moved') {
-          const player = msg.player as PlayerAvatarState;
-          setOnlinePlayers((prev) => {
-            const next = prev.filter((p) => p.studentId !== player.studentId);
-            next.push(player);
-            engineRef.current?.syncRemotePlayers(next, studentId);
-            return next;
-          });
-        } else if (msg.type === 'player_left') {
-          setOnlinePlayers((prev) => {
-            const next = prev.filter((p) => p.studentId !== msg.studentId);
-            engineRef.current?.syncRemotePlayers(next, studentId);
-            return next;
-          });
-        } else if (msg.type === 'progress_updated' && Array.isArray(msg.leaderboard)) {
-          setLeaderboard(msg.leaderboard);
-        } else if (msg.type === 'session_state_changed' && msg.session) {
-          const updated = msg.session as GameSession;
-          if (updated.status === 'ended' || !updated.isLinkActive) {
-            setSessionClosedNotice('Guru telah menonaktifkan atau mengakhiri sesi ini.');
-          }
-        }
-      } catch {
-        // Ignore non-JSON frames
+          avatarColor: currentAvatarColorRef.current,
+          ...latestLocalStateRef.current,
+          isOnline: false,
+        });
       }
     };
 
-    ws.onclose = () => setWsConnected(false);
-    ws.onerror = () => setWsConnected(false);
+    if (soloMode) {
+      wsRef.current?.close();
+      wsRef.current = null;
+      wsPlayersRef.current.clear();
+      httpPlayersRef.current.clear();
+      fsPlayersRef.current.clear();
+      setWsConnected(false);
+      setHttpSyncReady(false);
+      setOnlinePlayers([]);
+      engineRef.current?.syncRemotePlayers([], studentId);
+      leaveRoomEverywhere();
+      return;
+    }
+
+    let cancelled = false;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let ws: WebSocket | null = null;
+
+    try {
+      ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (cancelled) return;
+        setWsConnected(true);
+        ws?.send(
+          JSON.stringify({
+            type: 'join_room',
+            sessionId: session.id,
+            studentId,
+            displayName: studentName,
+            role: 'siswa',
+            avatarColor: currentAvatarColorRef.current,
+            skinId: currentSkinIdRef.current,
+            ...latestLocalStateRef.current,
+          })
+        );
+      };
+
+      ws.onmessage = (evt) => {
+        if (cancelled) return;
+        try {
+          const msg = JSON.parse(String(evt.data));
+          if (msg.type === 'room_init') {
+            const list = (msg.players || []) as PlayerAvatarState[];
+            const nextMap = new Map<string, PlayerAvatarState>();
+            for (const p of list) {
+              nextMap.set(p.studentId, p);
+            }
+            wsPlayersRef.current = nextMap;
+            rebuildAndSyncPlayers();
+          } else if (msg.type === 'player_joined' || msg.type === 'player_moved') {
+            const player = msg.player as PlayerAvatarState;
+            wsPlayersRef.current.set(player.studentId, player);
+            rebuildAndSyncPlayers();
+          } else if (msg.type === 'player_left') {
+            const leftId = String(msg.studentId || '');
+            wsPlayersRef.current.delete(leftId);
+            httpPlayersRef.current.delete(leftId);
+            fsPlayersRef.current.delete(leftId);
+            rebuildAndSyncPlayers();
+          } else if (msg.type === 'progress_updated' && Array.isArray(msg.leaderboard)) {
+            setLeaderboard(msg.leaderboard);
+          } else if (msg.type === 'session_state_changed' && msg.session) {
+            const updated = msg.session as GameSession;
+            if (updated.status === 'ended' || !updated.isLinkActive) {
+              setSessionClosedNotice('Guru telah menonaktifkan atau mengakhiri sesi ini.');
+            }
+          }
+        } catch {
+          // Ignore non-JSON frames
+        }
+      };
+
+      ws.onclose = () => {
+        if (!cancelled) setWsConnected(false);
+      };
+      ws.onerror = () => {
+        if (!cancelled) setWsConnected(false);
+      };
+    } catch {
+      setWsConnected(false);
+    }
+
+    // Immediate HTTP presence sync (ensures instant visibility & works on Vercel serverless)
+    void pushHttpPresence();
+
+    const syncInterval = window.setInterval(() => {
+      if (cancelled || soloModeRef.current) return;
+      const wsOpen = wsRef.current?.readyState === WebSocket.OPEN;
+      const elapsed = Date.now() - lastHttpPostMsRef.current;
+      // Poll faster (~800ms) when WS isn't open or player moved; keepalive (~3s) when WS is open
+      if ((!wsOpen && elapsed >= 750) || (dirtyMoveRef.current && !wsOpen) || elapsed >= 3000) {
+        dirtyMoveRef.current = false;
+        void pushHttpPresence();
+      }
+    }, 500);
+
+    // Optional Firestore realtime mirror for Google-authenticated students across serverless instances
+    const unsubFs = subscribeSessionPlayerStates(session.id, (fsPlayers) => {
+      if (cancelled) return;
+      const nextFs = new Map<string, PlayerAvatarState>();
+      for (const p of fsPlayers) {
+        nextFs.set(p.studentId, p);
+      }
+      fsPlayersRef.current = nextFs;
+      rebuildAndSyncPlayers();
+    });
+
+    if (auth.currentUser?.uid === studentId) {
+      lastFsPostMsRef.current = Date.now();
+      void syncPlayerStateToFirestore({
+        sessionId: session.id,
+        studentId,
+        displayName: studentName,
+        avatarColor: currentAvatarColorRef.current,
+        ...latestLocalStateRef.current,
+        isOnline: true,
+      });
+    }
+
+    const handlePageExit = () => {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(
+          `/api/sessions/${encodeURIComponent(session.joinCode)}/players/leave`,
+          new Blob([JSON.stringify({ studentId })], { type: 'application/json' })
+        );
+      }
+    };
+    window.addEventListener('beforeunload', handlePageExit);
 
     return () => {
-      ws.close();
+      cancelled = true;
+      window.clearInterval(syncInterval);
+      window.removeEventListener('beforeunload', handlePageExit);
+      unsubFs();
+      ws?.close();
       wsRef.current = null;
+      leaveRoomEverywhere();
     };
-  }, [session.id, studentId, studentName, currentAvatarColor, currentSkinId, soloMode]);
+  }, [session.id, session.joinCode, studentId, studentName, soloMode, pushHttpPresence, rebuildAndSyncPlayers]);
 
   const xpStats = useMemo(
     () => calculateXpProgressInLevel(progress.xpEarned + bonusXp),
@@ -1058,20 +1281,39 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
 
             <button
               type="button"
-              onClick={() => setSoloMode((s) => !s)}
+              data-testid="hud-mode-toggle-btn"
+              onClick={() => handleSetSoloMode(!soloMode)}
               title="Ubah mode Multiplayer / Individual"
-              aria-label={wsConnected && !soloMode ? 'Mode Online' : 'Mode Solo'}
-              className="hidden sm:inline-flex rounded-xl bg-slate-900/92 hover:bg-slate-800 text-white px-3 py-2 border border-slate-700/80 text-xs font-semibold items-center gap-1.5 min-h-[40px]"
+              aria-label={
+                soloMode
+                  ? 'Mode Individual — Klik untuk ubah ke Multiplayer'
+                  : 'Mode Multiplayer — Klik untuk ubah ke Individual'
+              }
+              className={`inline-flex rounded-xl px-2.5 sm:px-3 py-2 border text-xs font-bold items-center gap-1.5 min-h-[40px] transition-colors ${
+                soloMode
+                  ? 'bg-amber-950/90 hover:bg-amber-900 text-amber-200 border-amber-500/70'
+                  : 'bg-emerald-950/90 hover:bg-emerald-900 text-emerald-100 border-emerald-500/70'
+              }`}
             >
-              {wsConnected && !soloMode ? (
+              {soloMode ? (
                 <>
-                  <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{Math.max(1, onlinePlayers.length)} Online</span>
+                  <User className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="hidden md:inline">Individual</span>
+                  <span className="md:hidden">Solo</span>
                 </>
               ) : (
                 <>
-                  <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Solo</span>
+                  <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="hidden md:inline">
+                    Multiplayer · {Math.max(1, onlinePlayers.length)}
+                  </span>
+                  <span className="md:hidden">Multi · {Math.max(1, onlinePlayers.length)}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      wsConnected || httpSyncReady ? 'bg-emerald-400' : 'bg-amber-300 animate-pulse'
+                    }`}
+                  />
                 </>
               )}
             </button>
@@ -1690,7 +1932,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
               <div className="flex flex-wrap gap-1.5">
                 {[
                   { id: 'audio', label: 'Audio & Musik' },
-                  { id: 'controls', label: 'Kontrol HP/Tablet/PC' },
+                  { id: 'controls', label: 'Mode & Kontrol' },
                   { id: 'appearance', label: 'Arena & Skin 3D' },
                 ].map((t) => (
                   <button
@@ -1723,6 +1965,81 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
 
             {settingsTab === 'controls' && (
               <div className="space-y-5">
+                {/* Mode Permainan: Multiplayer vs Individual */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-bold">Mode Permainan Arena</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {soloMode
+                          ? 'Saat ini mode Individual (Solo): hanya kamu di arena.'
+                          : `Saat ini mode Multiplayer (${Math.max(1, onlinePlayers.length)} pemain aktif di sesi ${session.joinCode}).`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      data-testid="settings-mode-multiplayer"
+                      onClick={() => handleSetSoloMode(false)}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors ${
+                        !soloMode
+                          ? 'border-emerald-500 bg-emerald-600 text-white'
+                          : 'border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Users className="w-4 h-4" />
+                      Multiplayer
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="settings-mode-individual"
+                      onClick={() => handleSetSoloMode(true)}
+                      className={`py-2.5 px-3 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-2 transition-colors ${
+                        soloMode
+                          ? 'border-amber-500 bg-amber-500 text-slate-950'
+                          : 'border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <User className="w-4 h-4" />
+                      Individual (Solo)
+                    </button>
+                  </div>
+
+                  {!soloMode && (
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                        Pemain di Arena Saat Ini ({Math.max(1, onlinePlayers.length)})
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                        {onlinePlayers.length === 0 ? (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            {studentName} (Anda)
+                          </span>
+                        ) : (
+                          onlinePlayers.map((p) => (
+                            <span
+                              key={p.studentId}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-medium"
+                            >
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: p.avatarColor || '#3B82F6' }}
+                              />
+                              <span>{p.displayName}</span>
+                              {p.studentId === studentId && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                  (Anda)
+                                </span>
+                              )}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-4 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     {deviceProfile === 'phone' ? (
@@ -1926,6 +2243,19 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                 <>
                   <button
                     type="button"
+                    data-testid="pause-mode-toggle-btn"
+                    onClick={() => handleSetSoloMode(!soloMode)}
+                    className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-700 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    {soloMode ? (
+                      <User className="w-4 h-4 text-amber-500" />
+                    ) : (
+                      <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    )}
+                    Mode Permainan: {soloMode ? 'Individual (Solo)' : `Multiplayer (${Math.max(1, onlinePlayers.length)})`}
+                  </button>
+                  <button
+                    type="button"
                     onClick={toggleTouchPad}
                     className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-700 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
@@ -1952,7 +2282,7 @@ export const WorldPlayView: React.FC<WorldPlayViewProps> = ({
                     className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-700 font-semibold text-sm inline-flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     <Settings className="w-4 h-4 text-blue-600 dark:text-sky-400" />
-                    Pengaturan Volume, Audio & Kontrol
+                    Pengaturan Mode, Audio & Kontrol
                   </button>
                 </>
               )}

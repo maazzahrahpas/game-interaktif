@@ -3,12 +3,15 @@ import os from 'node:os';
 import path from 'node:path';
 import type {
   AchievementBadge,
+  AnimState,
   AnswerKey,
   ArenaThemeId,
   AuditLogEntry,
+  CharacterSkinId,
   Classroom,
   GameSession,
   LeaderboardEntry,
+  PlayerAvatarState,
   QuestionBank,
   StudentProgress,
   StudentQuestion,
@@ -378,6 +381,7 @@ function createSeedDatabase(): ServerDatabase {
 
 class EduverseServerStore {
   private db: ServerDatabase;
+  private roomPlayers = new Map<string, Map<string, PlayerAvatarState & { lastSeenMs: number }>>();
 
   constructor() {
     this.db = this.load();
@@ -1299,6 +1303,116 @@ class EduverseServerStore {
     );
     this.persist();
     return { ok: true as const, updatedAt: cred.updatedAt };
+  }
+
+  private resolveRoomSessionId(joinCodeOrSessionId: string): string {
+    const byCode = this.getSessionByCode(joinCodeOrSessionId);
+    if (byCode) return byCode.id;
+    const byId = this.db.gameSessions[joinCodeOrSessionId];
+    if (byId) return byId.id;
+    return joinCodeOrSessionId.trim();
+  }
+
+  private pruneStaleRoomPlayers(roomId: string, maxAgeMs = 30000) {
+    const room = this.roomPlayers.get(roomId);
+    if (!room) return;
+    const now = Date.now();
+    for (const [sid, entry] of room.entries()) {
+      if (now - entry.lastSeenMs > maxAgeMs) {
+        room.delete(sid);
+      }
+    }
+    if (room.size === 0) {
+      this.roomPlayers.delete(roomId);
+    }
+  }
+
+  public getRoomPlayers(joinCodeOrSessionId: string): PlayerAvatarState[] {
+    const roomId = this.resolveRoomSessionId(joinCodeOrSessionId);
+    this.pruneStaleRoomPlayers(roomId);
+    const room = this.roomPlayers.get(roomId);
+    if (!room) return [];
+    return Array.from(room.values()).map(({ lastSeenMs: _ts, ...player }) => player);
+  }
+
+  public upsertRoomPlayer(
+    joinCodeOrSessionId: string,
+    input: {
+      studentId: string;
+      displayName: string;
+      avatarColor?: string;
+      skinId?: CharacterSkinId;
+      x?: number;
+      y?: number;
+      z?: number;
+      rotY?: number;
+      animState?: AnimState;
+      currentZone?: WorldZoneId;
+    }
+  ): { sessionId: string; player: PlayerAvatarState; players: PlayerAvatarState[] } {
+    const sessionId = this.resolveRoomSessionId(joinCodeOrSessionId);
+    this.pruneStaleRoomPlayers(sessionId);
+
+    let room = this.roomPlayers.get(sessionId);
+    if (!room) {
+      room = new Map();
+      this.roomPlayers.set(sessionId, room);
+    }
+
+    const cleanStudentId = String(input.studentId || '').trim().slice(0, 128);
+    const prev = room.get(cleanStudentId);
+    const nowMs = Date.now();
+    const rawRot = Number.isFinite(Number(input.rotY)) ? Number(input.rotY) : prev?.rotY ?? Math.PI;
+    const wrappedRot = ((((rawRot + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI;
+    const clampCoord = (val: unknown, fallback: number, min: number, max: number) => {
+      const n = Number(val);
+      return Number.isFinite(n) ? Math.min(max, Math.max(min, Number(n.toFixed(2)))) : fallback;
+    };
+    const validAnims: AnimState[] = ['idle', 'walk', 'run', 'jump', 'interact'];
+    const nextAnim: AnimState =
+      input.animState && validAnims.includes(input.animState)
+        ? input.animState
+        : prev?.animState || 'idle';
+    const nextZone: WorldZoneId =
+      input.currentZone && ZONE_ORDER.includes(input.currentZone)
+        ? input.currentZone
+        : prev?.currentZone || 'sekolah';
+
+    const player: PlayerAvatarState = {
+      id: `ps_${sessionId}_${cleanStudentId}`,
+      sessionId,
+      studentId: cleanStudentId,
+      displayName: String(input.displayName || prev?.displayName || 'Penjelajah').trim().slice(0, 80),
+      avatarColor: String(input.avatarColor || prev?.avatarColor || '#3B82F6').slice(0, 20),
+      ...(input.skinId || prev?.skinId ? { skinId: input.skinId || prev?.skinId } : {}),
+      x: clampCoord(input.x, prev?.x ?? 0, -500, 500),
+      y: clampCoord(input.y, prev?.y ?? 0, -50, 200),
+      z: clampCoord(input.z, prev?.z ?? 14, -500, 500),
+      rotY: Number(wrappedRot.toFixed(3)),
+      animState: nextAnim,
+      currentZone: nextZone,
+      isOnline: true,
+      updatedAt: new Date(nowMs).toISOString(),
+    };
+
+    room.set(cleanStudentId, { ...player, lastSeenMs: nowMs });
+    return {
+      sessionId,
+      player,
+      players: Array.from(room.values()).map(({ lastSeenMs: _ts, ...p }) => p),
+    };
+  }
+
+  public removeRoomPlayer(joinCodeOrSessionId: string, studentId: string): PlayerAvatarState[] {
+    const sessionId = this.resolveRoomSessionId(joinCodeOrSessionId);
+    const room = this.roomPlayers.get(sessionId);
+    if (!room) return [];
+    room.delete(String(studentId || '').trim());
+    if (room.size === 0) {
+      this.roomPlayers.delete(sessionId);
+      return [];
+    }
+    return Array.from(room.values()).map(({ lastSeenMs: _ts, ...p }) => p);
   }
 }
 

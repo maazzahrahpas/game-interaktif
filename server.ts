@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import { createApiApp } from './src/server/createApiRouter.ts';
+import { serverStore } from './src/server/store.ts';
 import type { PlayerAvatarState } from './src/types/eduverse.ts';
 
 dotenv.config();
@@ -38,13 +39,16 @@ async function startServer() {
   };
 
   const getRoomPlayers = (sessionId: string): PlayerAvatarState[] => {
-    const list: PlayerAvatarState[] = [];
+    const byStudent = new Map<string, PlayerAvatarState>();
+    for (const p of serverStore.getRoomPlayers(sessionId)) {
+      byStudent.set(p.studentId, p);
+    }
     for (const info of clients.values()) {
       if (info.sessionId === sessionId && info.playerState) {
-        list.push(info.playerState);
+        byStudent.set(info.studentId, info.playerState);
       }
     }
-    return list;
+    return Array.from(byStudent.values());
   };
 
   wss.on('connection', (ws) => {
@@ -58,26 +62,28 @@ async function startServer() {
           const role = msg.role === 'guru' || msg.role === 'super_admin' ? msg.role : 'siswa';
           const avatarColor = String(msg.avatarColor || '#3B82F6');
           const skinId = typeof msg.skinId === 'string' ? msg.skinId : undefined;
+          const isObserverOnly = Boolean(msg.observerOnly);
 
-          const playerState: PlayerAvatarState | undefined =
-            role === 'siswa'
-              ? {
-                  id: `ps_${sessionId}_${studentId}`,
-                  sessionId,
-                  studentId,
-                  displayName,
-                  avatarColor,
-                  ...(skinId ? { skinId: skinId as PlayerAvatarState['skinId'] } : {}),
-                  x: Number(msg.x ?? 0),
-                  y: Number(msg.y ?? 0),
-                  z: Number(msg.z ?? 18),
-                  rotY: Number(msg.rotY ?? 0),
-                  animState: 'idle',
-                  currentZone: 'sekolah',
-                  isOnline: true,
-                  updatedAt: new Date().toISOString(),
-                }
-              : undefined;
+          const upserted = isObserverOnly
+            ? null
+            : serverStore.upsertRoomPlayer(sessionId, {
+                studentId,
+                displayName,
+                avatarColor,
+                skinId: skinId as PlayerAvatarState['skinId'],
+                x: Number(msg.x ?? 0),
+                y: Number(msg.y ?? 0),
+                z: Number(msg.z ?? 14),
+                rotY: Number(msg.rotY ?? Math.PI),
+              });
+          const playerState = upserted?.player;
+
+          // Replace any stale socket reference for the same studentId in this room
+          for (const [otherSock, otherInfo] of clients.entries()) {
+            if (otherSock !== ws && otherInfo.sessionId === sessionId && otherInfo.studentId === studentId) {
+              clients.delete(otherSock);
+            }
+          }
 
           clients.set(ws, { ws, sessionId, studentId, displayName, role, playerState });
 
@@ -92,19 +98,22 @@ async function startServer() {
           if (playerState) {
             broadcastToRoom(sessionId, { type: 'player_joined', player: playerState }, ws);
           }
-        } else if (msg.type === 'player_move') {
+        } else if (msg.type === 'player_move' || msg.type === 'player_update') {
           const info = clients.get(ws);
           if (!info || !info.playerState) return;
-          info.playerState = {
-            ...info.playerState,
-            x: Number(msg.x ?? info.playerState.x),
-            y: Number(msg.y ?? info.playerState.y),
-            z: Number(msg.z ?? info.playerState.z),
-            rotY: Number(msg.rotY ?? info.playerState.rotY),
-            animState: msg.animState || 'idle',
+          const upserted = serverStore.upsertRoomPlayer(info.sessionId, {
+            studentId: info.studentId,
+            displayName: typeof msg.displayName === 'string' ? msg.displayName : info.playerState.displayName,
+            avatarColor: typeof msg.avatarColor === 'string' ? msg.avatarColor : info.playerState.avatarColor,
+            skinId: typeof msg.skinId === 'string' ? (msg.skinId as PlayerAvatarState['skinId']) : info.playerState.skinId,
+            x: msg.x ?? info.playerState.x,
+            y: msg.y ?? info.playerState.y,
+            z: msg.z ?? info.playerState.z,
+            rotY: msg.rotY ?? info.playerState.rotY,
+            animState: msg.animState || info.playerState.animState,
             currentZone: msg.currentZone || info.playerState.currentZone,
-            updatedAt: new Date().toISOString(),
-          };
+          });
+          info.playerState = upserted.player;
           broadcastToRoom(info.sessionId, { type: 'player_moved', player: info.playerState }, ws);
         }
       } catch {
@@ -116,10 +125,16 @@ async function startServer() {
       const info = clients.get(ws);
       if (info) {
         clients.delete(ws);
-        broadcastToRoom(info.sessionId, {
-          type: 'player_left',
-          studentId: info.studentId,
-        });
+        const stillConnected = Array.from(clients.values()).some(
+          (c) => c.sessionId === info.sessionId && c.studentId === info.studentId
+        );
+        if (!stillConnected) {
+          serverStore.removeRoomPlayer(info.sessionId, info.studentId);
+          broadcastToRoom(info.sessionId, {
+            type: 'player_left',
+            studentId: info.studentId,
+          });
+        }
       }
     });
   });
@@ -128,6 +143,7 @@ async function startServer() {
   const apiApp = createApiApp({
     onBroadcastRoom: (sessionId, payload) => broadcastToRoom(sessionId, payload),
     getOnlineCount: (sessionId) => getRoomPlayers(sessionId).length,
+    getRoomPlayers: (sessionId) => getRoomPlayers(sessionId),
   });
   app.use(apiApp);
 

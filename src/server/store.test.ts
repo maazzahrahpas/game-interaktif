@@ -222,3 +222,99 @@ test('PUT /api/teacher/banks/:id/sync validates payload, returns 404 on unknown 
   }
 });
 
+test('serverStore roomPlayers & /api/sessions/:code/players track multiple students in the same arena and remove on solo switch', async () => {
+  const app = createApiApp();
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const addr = server.address();
+    assert.ok(addr && typeof addr === 'object');
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    // Student A enters Multiplayer on EDU101
+    const resA = await fetch(`${baseUrl}/api/sessions/EDU101/players`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentId: 'stu_multi_a',
+        displayName: 'Siswa A',
+        avatarColor: '#2563EB',
+        skinId: 'cyber_knight',
+        x: 4.5,
+        y: 0,
+        z: 12.2,
+        rotY: 9.5,
+        animState: 'walk',
+        currentZone: 'sekolah',
+      }),
+    });
+    assert.equal(resA.status, 200);
+    const jsonA = (await resA.json()) as {
+      ok: boolean;
+      player: { studentId: string; rotY: number; skinId?: string };
+      players: Array<{ studentId: string }>;
+    };
+    assert.equal(jsonA.ok, true);
+    assert.equal(jsonA.player.skinId, 'cyber_knight');
+    assert.ok(jsonA.player.rotY >= -Math.PI && jsonA.player.rotY <= Math.PI);
+
+    // Student B enters Multiplayer on the same EDU101 session
+    const resB = await fetch(`${baseUrl}/api/sessions/EDU101/players`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentId: 'stu_multi_b',
+        displayName: 'Siswa B',
+        avatarColor: '#10B981',
+        skinId: 'astro_pilot',
+        x: -3.0,
+        y: 0,
+        z: 10.0,
+        rotY: 0,
+        animState: 'idle',
+        currentZone: 'sekolah',
+      }),
+    });
+    assert.equal(resB.status, 200);
+    const jsonB = (await resB.json()) as {
+      ok: boolean;
+      players: Array<{ studentId: string; displayName: string }>;
+    };
+    const idsB = jsonB.players.map((p) => p.studentId);
+    assert.ok(idsB.includes('stu_multi_a'));
+    assert.ok(idsB.includes('stu_multi_b'));
+
+    // Leaderboard onlineCount reflects both active students
+    const lbRes = await fetch(`${baseUrl}/api/sessions/EDU101/leaderboard`);
+    const lbJson = (await lbRes.json()) as { ok: boolean; onlineCount: number };
+    assert.equal(lbJson.ok, true);
+    assert.ok(lbJson.onlineCount >= 2);
+
+    // Student A switches to Individual (Solo) -> DELETE removes only Student A
+    const delRes = await fetch(`${baseUrl}/api/sessions/EDU101/players/stu_multi_a`, {
+      method: 'DELETE',
+    });
+    assert.equal(delRes.status, 200);
+    const delJson = (await delRes.json()) as { ok: boolean; players: Array<{ studentId: string }> };
+    const remainingIds = delJson.players.map((p) => p.studentId);
+    assert.equal(remainingIds.includes('stu_multi_a'), false);
+    assert.equal(remainingIds.includes('stu_multi_b'), true);
+
+    // Clean up Student B via sendBeacon-compatible POST /leave
+    const leaveRes = await fetch(`${baseUrl}/api/sessions/EDU101/players/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId: 'stu_multi_b' }),
+    });
+    assert.equal(leaveRes.status, 200);
+
+    const getRes = await fetch(`${baseUrl}/api/sessions/EDU101/players`);
+    const getJson = (await getRes.json()) as { players: Array<{ studentId: string }> };
+    assert.equal(getJson.players.some((p) => p.studentId === 'stu_multi_b'), false);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+
